@@ -1,0 +1,11 @@
+{
+  "name": "pi-question",
+  "version": "0.1.0",
+  "description": "AskUserQuestion tool for pi: single/multi questions, multiSelect, previews, tab navigation",
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "keywords": ["pi", "pi-coding-agent", "ask-user-question", "questionnaire", "tui"]
+}
