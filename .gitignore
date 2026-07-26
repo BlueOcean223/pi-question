@@ -182,3 +182,6 @@ $RECYCLE.BIN/
 )
 
 pro-ref/
+
+# Agent workspace (notes, scratch files)
+.agent/
