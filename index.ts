@@ -276,8 +276,9 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					const i = currentTab;
 					const multi = q().multiSelect;
 
-					// Space: toggle (multiSelect only, not on Other)
-					if (multi && data === " " && !opt.isOther) {
+					// Space: toggle (multiSelect only, not on Other).
+					// matchesKey handles both legacy " " and Kitty-protocol CSI sequences.
+					if (multi && matchesKey(data, Key.space) && !opt.isOther) {
 						const s = pickedSet(i);
 						if (s.has(optionIndex)) s.delete(optionIndex);
 						else s.add(optionIndex);
