@@ -223,6 +223,12 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 			const isMulti = questions.length > 1;
 			const totalTabs = questions.length + 1; // questions + Submit
 
+			// Hide the animated working spinner while the dialog is up. If the
+			// dialog fills the screen the spinner row lands above the viewport,
+			// and every 80ms animation frame then forces a full redraw that
+			// clears the terminal scrollback — making wheel scrolling impossible.
+			ctx.ui.setWorkingVisible(false);
+
 			const result = await ctx.ui.custom<AskResult>((tui, theme, _kb, done) => {
 				// ---- State ----
 				let currentTab = 0;
@@ -741,7 +747,15 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 							for (const line of wrapTextWithAnsi(text, w)) lines.push(indent + line);
 						};
 
-						addWrapped(theme.fg("text", theme.bold(question.question)));
+						// Question text is markdown (models send tables, headings, bold)
+						const qKey = `q${qi}:${width}`;
+						let qLines = mdCache.get(qKey);
+						if (!qLines) {
+							qLines = new Markdown(question.question, 0, 0, mdTheme).render(Math.max(1, width - 1));
+							while (qLines.length > 0 && visibleWidth(qLines[qLines.length - 1].trim()) === 0) qLines.pop();
+							mdCache.set(qKey, qLines);
+						}
+						for (const line of qLines) lines.push(" " + line);
 						if (question.multiSelect) {
 							addWrapped(theme.fg("dim", "(multiple choice — pick any that apply)"));
 						}
@@ -963,6 +977,8 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					handleInput,
 				};
 			});
+
+			ctx.ui.setWorkingVisible(true);
 
 			if (result.outcome === "cancelled") {
 				return {
