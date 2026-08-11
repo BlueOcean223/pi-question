@@ -8,7 +8,8 @@
  * - "Other" is an inline input row: focus it and just start typing
  * - multiSelect: Space/Enter toggle, explicit Next/Submit button confirms
  * - "Chat about this": ends the dialog asking the model to clarify instead
- * - Option previews: side-by-side layout, markdown-rendered, `n` adds notes
+ * - Option previews: side-by-side layout, markdown-rendered; "Other" and
+ *   `n` notes both stay available — previews don't remove the escape hatch
  * - Answers keyed by full question text; notes/preview echoed as annotations
  * - Stable layout: every tab padded to the tallest question's height
  */
@@ -235,9 +236,16 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				let editing: EditKind = "none";
 				let cachedLines: string[] | undefined;
 				const cursorByQ = questions.map(() => 0);
+				// Sticky "which option's preview is showing" for preview-layout
+				// questions: stays put when focus moves onto Other/Chat, instead of
+				// snapping to whichever option happens to sit last in the list.
+				const lastOptionByQ = questions.map(() => 0);
 				const picked = questions.map(() => new Set<number>());
 				const freeform = questions.map(() => "");
 				const freeformSelected = questions.map(() => false);
+				// Preview-question "n" notes are a separate field from Other's
+				// freeform text — see rowsFor() for why both now coexist there.
+				const notesText = questions.map(() => "");
 
 				const mdTheme = getMarkdownTheme();
 				const mdCache = new Map<string, string[]>(); // `${qi}:${oi}:${width}` -> rendered lines
@@ -263,10 +271,10 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				function rowsFor(qi: number): Row[] {
 					const question = questions[qi];
 					const rows: Row[] = question.options.map((_, oi) => ({ kind: "option", optionIndex: oi }));
-					if (hasPreviewLayout(question)) {
-						rows.push({ kind: "chat", optionIndex: -1 });
-						return rows;
-					}
+					// Preview layout keeps the "Other" row too: comparing options visually
+					// is not a reason to remove the escape hatch. Claude Code's preview
+					// view drops Other; Grok Build keeps a sticky freeform row regardless
+					// of preview — this follows Grok Build.
 					rows.push({ kind: "other", optionIndex: -1 });
 					if (question.multiSelect) rows.push({ kind: "submit", optionIndex: -1 });
 					rows.push({ kind: "chat", optionIndex: -1 });
@@ -278,8 +286,11 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				}
 
 				function setCursor(v: number) {
-					const max = rowsFor(currentTab).length - 1;
-					cursorByQ[currentTab] = Math.max(0, Math.min(v, max));
+					const rows = rowsFor(currentTab);
+					const clamped = Math.max(0, Math.min(v, rows.length - 1));
+					cursorByQ[currentTab] = clamped;
+					const row = rows[clamped];
+					if (row.kind === "option") lastOptionByQ[currentTab] = row.optionIndex;
 				}
 
 				function isAnswered(qi: number): boolean {
@@ -295,7 +306,9 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					const labels = [...picked[qi]].sort((a, b) => a - b).map((idx) => question.options[idx].label);
 					const text = freeform[qi].trim();
 					const custom = freeformSelected[qi] && text ? [text] : [];
-					const notes = text && custom.length === 0 ? text : undefined;
+					const strayOther = text && custom.length === 0 ? text : undefined;
+					const noteFromN = notesText[qi].trim() || undefined;
+					const notes = noteFromN && strayOther ? `${noteFromN} / ${strayOther}` : (noteFromN ?? strayOther);
 					let preview: string | undefined;
 					if (!question.multiSelect && picked[qi].size === 1) {
 						preview = question.options[[...picked[qi]][0]].preview;
@@ -377,7 +390,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 
 				function startNotesEdit() {
 					editing = "notes";
-					input.setValue(freeform[currentTab]);
+					input.setValue(notesText[currentTab]);
 					input.focused = true;
 					refresh();
 				}
@@ -400,7 +413,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				}
 
 				function saveNotesEdit() {
-					freeform[currentTab] = input.getValue();
+					notesText[currentTab] = input.getValue();
 					editing = "none";
 					input.focused = false;
 					refresh();
@@ -457,8 +470,11 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					const question = q();
 					const k = question.options.length;
 					if (hasPreviewLayout(question)) {
-						// Previews are for comparing: digits focus, Enter decides.
-						if (n - 1 < k) {
+						// Previews are for comparing: digits only move focus — including
+						// onto the Other/Chat rows, which preview no longer hides. Enter
+						// (or typing, on the Other row) is what actually decides.
+						const rows = rowsFor(currentTab);
+						if (n - 1 < rows.length) {
 							setCursor(n - 1);
 							refresh();
 						}
@@ -650,7 +666,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 						const inputLine = input.render(Math.max(4, width - visibleWidth("Notes: ")))[0] ?? "";
 						return label + inputLine;
 					}
-					const text = freeform[qi].trim();
+					const text = notesText[qi].trim();
 					const body = text
 						? theme.italic(theme.fg("muted", truncateToWidth(text, Math.max(4, width - 7))))
 						: theme.fg("dim", "press n to add notes");
@@ -777,7 +793,10 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 									}),
 								);
 							}
-							const focusedOption = Math.min(view.focusRow, question.options.length - 1);
+							// Once focus moves past the option list (onto Other/Chat), keep
+							// showing the last option actually looked at (lastOptionByQ) rather
+							// than snapping to whichever option is last in the array.
+							const focusedOption = view.focusRow < question.options.length ? view.focusRow : lastOptionByQ[qi];
 							const right = previewBoxLines(qi, focusedOption, rightW);
 							const rowCount = Math.max(left.length, right.length);
 							for (let t = 0; t < rowCount; t++) {
@@ -789,9 +808,17 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 							const desc = question.options[focusedOption]?.description;
 							if (desc) addWrapped(theme.fg("muted", desc), "   ");
 							lines.push("");
+							// No leading space here: otherRowLine's own pointer ("❯ "/"  ") is the
+							// row indent, same as the option rows above and the chat row below —
+							// an extra space would shift its pointer one column out of line.
+							const otherRowIndex = rows.findIndex((r) => r.kind === "other");
+							const otherFocused = view.focusRow === otherRowIndex;
+							lines.push(otherRowLine(question, otherFocused, otherFocused && view.editingKind === "other", width));
+							lines.push("");
 							const chatFocused = rows[view.focusRow]?.kind === "chat";
 							const chatPointer = chatFocused ? theme.fg("accent", "❯ ") : "  ";
-							lines.push(chatPointer + theme.fg(chatFocused ? "accent" : "muted", "Chat about this"));
+							const chatNum = theme.fg("dim", `${question.options.length + 2}. `);
+							lines.push(chatPointer + chatNum + theme.fg(chatFocused ? "accent" : "muted", "Chat about this"));
 							return lines;
 						}
 
@@ -809,6 +836,17 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 									);
 									break;
 								case "other":
+									// Stacked preview (narrow terminal): box + notes sit above the Other row.
+									// Notes always render here (even with no preview box) to match the
+									// side-by-side layout, which never hides the Notes line either.
+									if (preview) {
+										const focusedOption = view.focusRow < question.options.length ? view.focusRow : lastOptionByQ[qi];
+										const box = previewBoxLines(qi, focusedOption, Math.max(10, width - 2));
+										lines.push("");
+										for (const line of box) lines.push(" " + line);
+										lines.push(" " + notesLine(qi, width - 1, view.editingKind === "notes"));
+										lines.push("");
+									}
 									lines.push(otherRowLine(question, focused, focused && view.editingKind === "other", width));
 									break;
 								case "submit": {
@@ -819,20 +857,8 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 									break;
 								}
 								case "chat": {
-									// Stacked preview (narrow terminal): box + notes sit above the chat row
-									if (preview) {
-										const focusedOption = Math.min(view.focusRow, question.options.length - 1);
-										const box = previewBoxLines(qi, focusedOption, Math.max(10, width - 2));
-										if (box.length > 0) {
-											lines.push("");
-											for (const line of box) lines.push(" " + line);
-											lines.push(" " + notesLine(qi, width - 1, view.editingKind === "notes"));
-											lines.push("");
-										}
-									}
 									const pointer = focused ? theme.fg("accent", "❯ ") : "  ";
-									// Digits map to the chat row only in non-preview layouts
-									const num = preview ? "" : theme.fg("dim", `${question.options.length + 2}. `);
+									const num = theme.fg("dim", `${question.options.length + 2}. `);
 									lines.push(pointer + num + theme.fg(focused ? "accent" : "muted", "Chat about this"));
 									break;
 								}
