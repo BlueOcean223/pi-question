@@ -6,11 +6,13 @@
  * - Multiple questions: tab bar (header chips) + Submit review page
  * - Number keys 1-9 select directly (full-width digits normalized)
  * - "Other" is an inline input row: focus it and just start typing
+ * - Skip: leave a question unanswered and continue (partial submit allowed)
  * - multiSelect: Space/Enter toggle, explicit Next/Submit button confirms
  * - "Chat about this": ends the dialog asking the model to clarify instead
  * - Option previews: side-by-side layout, markdown-rendered; "Other" and
  *   `n` notes both stay available — previews don't remove the escape hatch
  * - Answers keyed by full question text; notes/preview echoed as annotations
+ * - 5-minute idle auto-submits whatever is selected so far
  * - Stable layout: every tab padded to the tallest question's height
  */
 
@@ -55,20 +57,24 @@ interface Answer {
 	notes?: string;
 	/** Preview content of the selected option (single-select only) */
 	preview?: string;
+	/** Notes present, no option or Other picked. Not a vote. */
+	notesOnly?: boolean;
 }
 
-type Outcome = "answered" | "cancelled" | "chat";
+type Outcome = "answered" | "cancelled" | "chat" | "afk";
 
 interface AskResult {
 	questions: Question[];
 	answers: Answer[];
 	outcome: Outcome;
+	/** Set when the dialog auto-submitted after idle. Absent on every human path. */
+	afkTimeoutMs?: number;
 }
 
 type EditKind = "none" | "other" | "notes";
 
 interface Row {
-	kind: "option" | "other" | "submit" | "chat";
+	kind: "option" | "other" | "submit" | "skip" | "chat";
 	optionIndex: number;
 }
 
@@ -91,10 +97,12 @@ const QuestionSchema = Type.Object({
 		description: "The complete question to ask, ending with a question mark. Must be unique across questions.",
 	}),
 	options: Type.Array(OptionSchema, {
-		minItems: 2,
+		// No minItems: Pi validates the schema before execute(). A min of 2
+		// would bounce as a generic "array length" error and the model would
+		// invent a filler option. Too-few is steered in validateQuestions.
 		maxItems: 4,
 		description:
-			"2-4 distinct options with unique labels. If you recommend one, put it first and append ' (Recommended)' to its label. Do not add an 'Other' option — it is provided automatically.",
+			"2-4 distinct options with unique labels. If you recommend one, put it first and append ' (Recommended)' to its label. Do not add Other, None, or Skip — those actions are provided automatically.",
 	}),
 	multiSelect: Type.Optional(Type.Boolean({ description: "Allow selecting multiple options (default: false)" })),
 });
@@ -105,26 +113,83 @@ const AskParams = Type.Object({
 
 // ---------- Model-facing result strings ----------
 
+/** Model-facing value when the user wrote notes but picked no option. */
+const NOTES_ONLY = "(notes only)";
+
 const CANCEL_TEXT =
 	"User declined to answer the questions. Continue with the task using your best judgment, or ask different questions.";
 
-function formatAccepted(answers: Answer[]): string {
-	const entries = answers.map((a) => {
-		const parts = [`"${a.question}"="${a.labels.join(", ")}"`];
-		if (a.preview) parts.push(`selected preview:\n${a.preview}`);
-		if (a.notes) parts.push(`user notes: ${a.notes}`);
+const AFK_TIMEOUT_MS = 5 * 60 * 1000;
+const AFK_COUNTDOWN_MS = 20 * 1000;
+
+function hasRealChoice(answer: Answer): boolean {
+	return answer.labels.length > 0 && !answer.notesOnly;
+}
+
+function formatAnswerEntry(answer: Answer): string | null {
+	if (answer.notesOnly) {
+		const parts = [`"${answer.question}"="${NOTES_ONLY}"`];
+		if (answer.notes) parts.push(`user notes: ${answer.notes}`);
 		return parts.join(" ");
+	}
+	if (answer.labels.length === 0 && !answer.notes) return null;
+	const parts = [
+		answer.labels.length > 0
+			? `"${answer.question}"="${answer.labels.join(", ")}"`
+			: `"${answer.question}"=(no option selected)`,
+	];
+	if (answer.preview) parts.push(`selected preview:\n${answer.preview}`);
+	if (answer.notes) parts.push(`user notes: ${answer.notes}`);
+	return parts.join(" ");
+}
+
+function allFullyAnswered(questions: Question[], answers: Answer[]): boolean {
+	const byQuestion = new Map(answers.map((a) => [a.question, a]));
+	return questions.every((q) => {
+		const a = byQuestion.get(q.question);
+		return !!a && hasRealChoice(a) && a.customLabels.length === 0 && !a.notes && !a.notesOnly;
 	});
-	return `User has answered your questions: ${entries.join(", ")}. You can now continue with the user's answers in mind.`;
+}
+
+function formatAfkTimeout(timeoutMs: number): string {
+	const minutes = Math.round(timeoutMs / 60_000);
+	const unit = minutes === 1 ? "minute" : "minutes";
+	return `The dialog auto-continued after ${minutes} ${unit} of idle (user away from keyboard).`;
+}
+
+function formatSubmitted(result: AskResult): string {
+	const body = result.answers.map(formatAnswerEntry).filter((e): e is string => e !== null).join(", ");
+
+	if (result.outcome === "afk") {
+		const timeout = formatAfkTimeout(result.afkTimeoutMs ?? AFK_TIMEOUT_MS);
+		return body ? `${timeout}\n\nBefore going idle the user had selected: ${body}.` : timeout;
+	}
+
+	if (!body) {
+		return "The user did not answer the questions.";
+	}
+
+	if (allFullyAnswered(result.questions, result.answers)) {
+		return `Your questions have been answered: ${body}. You can now continue with these answers in mind.`;
+	}
+
+	return (
+		`The user answered: ${body}. Read the answers carefully — they may request clarification, ` +
+		`changes, or that you not proceed — and follow what they actually say.`
+	);
 }
 
 function formatChatAboutThis(questions: Question[], answers: Answer[]): string {
 	const byQuestion = new Map(answers.map((a) => [a.question, a]));
 	const lines = questions.map((q) => {
 		const a = byQuestion.get(q.question);
-		return a && a.labels.length > 0
-			? `- "${q.question}"\n  Answer: ${a.labels.join(", ")}`
-			: `- "${q.question}"\n  (No answer provided)`;
+		if (!a) return `- "${q.question}"\n  (No answer provided)`;
+		const bits = [`- "${q.question}"`];
+		if (a.notesOnly) bits.push(`  Answer: ${NOTES_ONLY}`);
+		else if (a.labels.length > 0) bits.push(`  Answer: ${a.labels.join(", ")}`);
+		else bits.push("  (No answer provided)");
+		if (a.notes) bits.push(`  Notes: ${a.notes}`);
+		return bits.join("\n");
 	});
 	return (
 		"The user wants to clarify these questions.\n" +
@@ -149,28 +214,63 @@ function errorResult(message: string, questions: Question[] = []) {
 	};
 }
 
-function validateQuestions(questions: { question: string; options: { label: string }[] }[]): string | undefined {
+function tooFewOptionsSteer(
+	thin: { question: string; options?: { label: string }[] }[],
+): string {
+	const details = thin
+		.map((q) => {
+			const labels = (q.options ?? []).map((o) => o.label).filter(Boolean);
+			const only = labels.length > 0 ? ` (only: ${labels.join(", ")})` : "";
+			return `"${q.question}"${only}`;
+		})
+		.join("; ");
+	return (
+		`This call included a question with fewer than 2 options, so it was rejected and the person never saw it. ` +
+		`Rejected: ${details}. ` +
+		`A question with a single option has no decision in it. Do not retry this call and do not invent a filler second option. ` +
+		`Instead, state the one path you were going to offer as the approach you are taking, then continue with the task. ` +
+		`If this call also contained questions with 2 to 4 options (each with distinct labels), you may re-ask those questions alone in a new call. ` +
+		`Ask a question only when the person has at least two genuinely distinct choices.`
+	);
+}
+
+function validateQuestions(questions: { question: string; options?: { label: string }[] }[]): string | undefined {
 	if (questions.length > MAX_QUESTIONS) {
 		return `Error: Too many questions (${questions.length}). Ask at most ${MAX_QUESTIONS} per call.`;
 	}
 	const texts = new Set<string>();
+	const thin: { question: string; options?: { label: string }[] }[] = [];
+	let tooMany: string | undefined;
+	let dupLabel: string | undefined;
 	for (const q of questions) {
 		if (texts.has(q.question)) {
 			return `Error: Duplicate question text: "${q.question}". Question texts must be unique.`;
 		}
 		texts.add(q.question);
-		if (q.options.length < 2 || q.options.length > 4) {
-			return `Error: Question "${q.question}" has ${q.options.length} option(s). Provide 2-4 options (an "Other" free-text option is added automatically).`;
+		const opts = q.options ?? [];
+		if (opts.length < 2) {
+			thin.push(q);
+			continue;
+		}
+		if (opts.length > 4) {
+			tooMany ??=
+				`Error: Question "${q.question}" has ${opts.length} option(s). Provide at most 4 options (an "Other" free-text option is added automatically).`;
+			continue;
 		}
 		const labels = new Set<string>();
-		for (const opt of q.options) {
+		for (const opt of opts) {
 			if (labels.has(opt.label)) {
-				return `Error: Duplicate option label "${opt.label}" in question "${q.question}". Option labels must be unique within a question.`;
+				dupLabel ??=
+					`Error: Duplicate option label "${opt.label}" in question "${q.question}". Option labels must be unique within a question.`;
+				break;
 			}
 			labels.add(opt.label);
 		}
 	}
-	return undefined;
+	// Too-few wins: a generic "add more options" error is exactly what makes
+	// the model invent a filler second choice.
+	if (thin.length > 0) return tooFewOptionsSteer(thin);
+	return tooMany ?? dupLabel;
 }
 
 /** Extract a printable character from raw input (legacy or Kitty protocol). */
@@ -200,11 +300,11 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 		name: "ask_user_question",
 		label: "Ask User Question",
 		description:
-			"Ask the user one or more questions when you are blocked on a decision that is genuinely theirs to make — choosing between approaches, clarifying ambiguous requirements, or picking preferences you cannot infer. Each question shows 2-4 options plus an automatic free-text 'Other'. Use multiSelect for non-exclusive choices. Use option previews (code snippets, mockups) when users need to visually compare concrete artifacts. If you recommend an option, put it first and append ' (Recommended)' to its label. The user may also choose to chat about the questions instead of answering — treat that as a request for clarification, not a refusal. Do not use this for decisions with an obvious conventional default.",
+			"Ask the user one or more questions when you are blocked on a decision that is genuinely theirs to make — choosing between approaches, clarifying ambiguous requirements, or picking preferences you cannot infer. Reserve this for decisions where the user's answer changes what you do next — not for choices with a conventional default or facts you can verify in the codebase yourself. In those cases pick the obvious option, mention it in your response, and proceed. Each question shows 2-4 options plus an automatic free-text 'Other' and a Skip action — do not add Other, None, or Skip as options. Use multiSelect for non-exclusive choices. Use option previews (code snippets, mockups) when users need to visually compare concrete artifacts. If you recommend an option, put it first and append ' (Recommended)' to its label. The user may skip questions or submit a partial answer; read skips and notes carefully — they may ask you not to proceed. The user may also chat about the questions instead of answering — treat that as a request for clarification, not a refusal.",
 		parameters: AskParams,
 		executionMode: "sequential",
 
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			if (ctx.mode !== "tui") {
 				return errorResult("Error: UI not available (running in non-interactive mode)");
 			}
@@ -229,23 +329,31 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 			// and every 80ms animation frame then forces a full redraw that
 			// clears the terminal scrollback — making wheel scrolling impossible.
 			ctx.ui.setWorkingVisible(false);
-
-			const result = await ctx.ui.custom<AskResult>((tui, theme, _kb, done) => {
+			let result: AskResult;
+			try {
+				if (signal?.aborted) {
+					result = { questions, answers: [], outcome: "cancelled" };
+				} else {
+				result = await ctx.ui.custom<AskResult>((tui, theme, _kb, done) => {
 				// ---- State ----
 				let currentTab = 0;
 				let editing: EditKind = "none";
 				let cachedLines: string[] | undefined;
 				const cursorByQ = questions.map(() => 0);
 				// Sticky "which option's preview is showing" for preview-layout
-				// questions: stays put when focus moves onto Other/Chat, instead of
+				// questions: stays put when focus moves onto Other/Skip/Chat, instead of
 				// snapping to whichever option happens to sit last in the list.
 				const lastOptionByQ = questions.map(() => 0);
 				const picked = questions.map(() => new Set<number>());
 				const freeform = questions.map(() => "");
 				const freeformSelected = questions.map(() => false);
+				const skipped = questions.map(() => false);
 				// Preview-question "n" notes are a separate field from Other's
 				// freeform text — see rowsFor() for why both now coexist there.
 				const notesText = questions.map(() => "");
+
+				let lastActivity = Date.now();
+				let afkTimer: ReturnType<typeof setInterval> | undefined;
 
 				const mdTheme = getMarkdownTheme();
 				const mdCache = new Map<string, string[]>(); // `${qi}:${oi}:${width}` -> rendered lines
@@ -277,6 +385,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					// of preview — this follows Grok Build.
 					rows.push({ kind: "other", optionIndex: -1 });
 					if (question.multiSelect) rows.push({ kind: "submit", optionIndex: -1 });
+					rows.push({ kind: "skip", optionIndex: -1 });
 					rows.push({ kind: "chat", optionIndex: -1 });
 					return rows;
 				}
@@ -297,8 +406,16 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					return picked[qi].size > 0 || (freeformSelected[qi] && freeform[qi].trim().length > 0);
 				}
 
-				function allAnswered(): boolean {
-					return questions.every((_, i) => isAnswered(i));
+				function hasNotes(qi: number): boolean {
+					return notesText[qi].trim().length > 0 || (freeform[qi].trim().length > 0 && !freeformSelected[qi]);
+				}
+
+				function isSettled(qi: number): boolean {
+					return isAnswered(qi) || skipped[qi];
+				}
+
+				function allSettled(): boolean {
+					return questions.every((_, i) => isSettled(i));
 				}
 
 				function buildAnswer(qi: number): Answer {
@@ -313,29 +430,86 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					if (!question.multiSelect && picked[qi].size === 1) {
 						preview = question.options[[...picked[qi]][0]].preview;
 					}
+					const chosen = [...labels, ...custom];
+					const notesOnly = chosen.length === 0 && !!notes;
 					return {
 						header: question.header,
 						question: question.question,
-						labels: [...labels, ...custom],
+						labels: chosen,
 						customLabels: custom,
+						...(notesOnly ? { notesOnly: true } : {}),
 						...(notes ? { notes } : {}),
 						...(preview ? { preview } : {}),
 					};
 				}
 
+				function flushEdits() {
+					if (editing === "other") {
+						freeform[currentTab] = input.getValue();
+						const text = freeform[currentTab].trim();
+						if (text && picked[currentTab].size === 0) freeformSelected[currentTab] = true;
+						else if (!text) freeformSelected[currentTab] = false;
+					} else if (editing === "notes") {
+						notesText[currentTab] = input.getValue();
+					}
+					editing = "none";
+					input.focused = false;
+				}
+
 				// ---- Submission ----
 
+				let finished = false;
+				function finish(result: AskResult) {
+					if (finished) return;
+					finished = true;
+					signal?.removeEventListener("abort", onAbort);
+					clearInterval(afkTimer);
+					done(result);
+				}
+
+				function onAbort() {
+					finish({ questions, answers: [], outcome: "cancelled" });
+				}
+				signal?.addEventListener("abort", onAbort);
+
 				function submitAnswered() {
-					done({ questions, answers: questions.map((_, i) => buildAnswer(i)), outcome: "answered" });
+					flushEdits();
+					finish({ questions, answers: questions.map((_, i) => buildAnswer(i)), outcome: "answered" });
 				}
 
 				function submitCancel() {
-					done({ questions, answers: [], outcome: "cancelled" });
+					finish({ questions, answers: [], outcome: "cancelled" });
 				}
 
 				function submitChat() {
-					const answers = questions.map((_, i) => i).filter((i) => isAnswered(i)).map((i) => buildAnswer(i));
-					done({ questions, answers, outcome: "chat" });
+					flushEdits();
+					const answers = questions
+						.map((_, i) => i)
+						.filter((i) => isAnswered(i) || hasNotes(i))
+						.map((i) => buildAnswer(i));
+					finish({ questions, answers, outcome: "chat" });
+				}
+
+				function submitAfk() {
+					flushEdits();
+					finish({
+						questions,
+						answers: questions.map((_, i) => buildAnswer(i)),
+						outcome: "afk",
+						afkTimeoutMs: AFK_TIMEOUT_MS,
+					});
+				}
+
+				function skipQuestion() {
+					const i = currentTab;
+					picked[i].clear();
+					freeformSelected[i] = false;
+					skipped[i] = true;
+					if (!isMulti) {
+						submitAnswered();
+						return;
+					}
+					advanceAfterAnswer();
 				}
 
 				function advanceAfterAnswer() {
@@ -343,11 +517,10 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 						submitAnswered();
 						return;
 					}
-					// Jump to next unanswered question, else Submit tab
 					let next = questions.length;
 					for (let step = 1; step <= questions.length; step++) {
 						const cand = (currentTab + step) % questions.length;
-						if (!isAnswered(cand)) {
+						if (!isSettled(cand)) {
 							next = cand;
 							break;
 						}
@@ -363,6 +536,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					picked[i].clear();
 					picked[i].add(oi);
 					freeformSelected[i] = false;
+					skipped[i] = false;
 					advanceAfterAnswer();
 				}
 
@@ -370,6 +544,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					const i = currentTab;
 					if (picked[i].has(oi)) picked[i].delete(oi);
 					else picked[i].add(oi);
+					if (picked[i].size > 0) skipped[i] = false;
 					refresh();
 				}
 
@@ -377,6 +552,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					const i = currentTab;
 					picked[i].clear();
 					freeformSelected[i] = true;
+					skipped[i] = false;
 					advanceAfterAnswer();
 				}
 
@@ -403,7 +579,10 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					if (text) {
 						// Tentatively selected unless an option is already picked
 						// (then the text rides along as a note instead).
-						if (picked[i].size === 0) freeformSelected[i] = true;
+						if (picked[i].size === 0) {
+							freeformSelected[i] = true;
+							skipped[i] = false;
+						}
 					} else {
 						freeformSelected[i] = false;
 					}
@@ -441,6 +620,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					}
 					if (q().multiSelect) {
 						freeformSelected[i] = true; // included in the selection set; keep toggling
+						skipped[i] = false;
 						refresh();
 					} else {
 						commitCustom();
@@ -455,10 +635,10 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				function pressSubmitRow() {
 					const i = currentTab;
 					if (!isMulti) {
-						if (isAnswered(i)) submitAnswered();
+						submitAnswered();
 						return;
 					}
-					if (isAnswered(i)) {
+					if (isSettled(i)) {
 						advanceAfterAnswer();
 					} else {
 						currentTab = Math.min(currentTab + 1, questions.length);
@@ -495,13 +675,24 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 						return;
 					}
 					if (n === k + 2) {
+						const rows = rowsFor(currentTab);
+						setCursor(rows.findIndex((r) => r.kind === "skip"));
+						skipQuestion();
+						return;
+					}
+					if (n === k + 3) {
 						submitChat();
 					}
 				}
 
 				// ---- Input handling ----
 
+				function bumpActivity() {
+					lastActivity = Date.now();
+				}
+
 				function handleEditingInput(data: string) {
+					bumpActivity();
 					if (editing === "other") {
 						if (isMulti && (matchesKey(data, Key.tab) || matchesKey(data, Key.shift("tab")))) {
 							const delta = matchesKey(data, Key.tab) ? 1 : -1;
@@ -528,6 +719,8 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 						return;
 					}
 
+					bumpActivity();
+
 					// Tab navigation
 					if (isMulti) {
 						if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
@@ -542,7 +735,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 
 					// Submit tab
 					if (currentTab === questions.length) {
-						if (matchesKey(data, Key.enter) && allAnswered()) {
+						if (matchesKey(data, Key.enter)) {
 							submitAnswered();
 						} else if (matchesKey(data, Key.escape)) {
 							submitCancel();
@@ -609,6 +802,9 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 								return;
 							case "submit":
 								pressSubmitRow();
+								return;
+							case "skip":
+								skipQuestion();
 								return;
 							case "chat":
 								submitChat();
@@ -815,9 +1011,15 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 							const otherFocused = view.focusRow === otherRowIndex;
 							lines.push(otherRowLine(question, otherFocused, otherFocused && view.editingKind === "other", width));
 							lines.push("");
+							const skipFocused = rows[view.focusRow]?.kind === "skip";
+							const skipPointer = skipFocused ? theme.fg("accent", "❯ ") : "  ";
+							const skipNum = theme.fg("dim", `${question.options.length + 2}. `);
+							const skipLabel = skipped[qi] ? "Skip ✓" : "Skip";
+							lines.push(skipPointer + skipNum + theme.fg(skipFocused ? "accent" : "muted", skipLabel));
+							lines.push("");
 							const chatFocused = rows[view.focusRow]?.kind === "chat";
 							const chatPointer = chatFocused ? theme.fg("accent", "❯ ") : "  ";
-							const chatNum = theme.fg("dim", `${question.options.length + 2}. `);
+							const chatNum = theme.fg("dim", `${question.options.length + 3}. `);
 							lines.push(chatPointer + chatNum + theme.fg(chatFocused ? "accent" : "muted", "Chat about this"));
 							return lines;
 						}
@@ -856,9 +1058,16 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 									lines.push(pointer + "    " + theme.bold(theme.fg(focused ? "accent" : "muted", label)));
 									break;
 								}
-								case "chat": {
+								case "skip": {
 									const pointer = focused ? theme.fg("accent", "❯ ") : "  ";
 									const num = theme.fg("dim", `${question.options.length + 2}. `);
+									const label = skipped[qi] ? "Skip ✓" : "Skip";
+									lines.push(pointer + num + theme.fg(focused ? "accent" : "muted", label));
+									break;
+								}
+								case "chat": {
+									const pointer = focused ? theme.fg("accent", "❯ ") : "  ";
+									const num = theme.fg("dim", `${question.options.length + 3}. `);
 									lines.push(pointer + num + theme.fg(focused ? "accent" : "muted", "Chat about this"));
 									break;
 								}
@@ -879,20 +1088,27 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					addWrapped(theme.fg("accent", theme.bold("Ready to submit")));
 					lines.push("");
 					for (let i = 0; i < questions.length; i++) {
-						if (!isAnswered(i)) continue;
 						const a = buildAnswer(i);
 						const note = a.notes ? theme.fg("dim", " ✎") : "";
-						addWrapped(theme.fg("muted", `${a.header}: `) + theme.fg("text", a.labels.join(", ")) + note);
+						if (isAnswered(i)) {
+							addWrapped(
+								theme.fg("muted", `${a.header}: `) + theme.fg("text", a.labels.join(", ")) + note,
+							);
+						} else if (a.notesOnly || a.notes) {
+							addWrapped(theme.fg("muted", `${a.header}: `) + theme.fg("dim", "(notes only)") + note);
+						} else if (skipped[i]) {
+							addWrapped(theme.fg("muted", `${a.header}: `) + theme.fg("dim", "(skipped)"));
+						}
 					}
 					lines.push("");
-					if (allAnswered()) {
+					if (allSettled()) {
 						addWrapped(theme.fg("success", "Press Enter to submit"));
 					} else {
 						const missing = questions
-							.filter((_, i) => !isAnswered(i))
+							.filter((_, i) => !isSettled(i))
 							.map((qq) => qq.header)
 							.join(", ");
-						addWrapped(theme.fg("warning", `Unanswered: ${missing}`));
+						addWrapped(theme.fg("warning", `Unanswered: ${missing} — Enter submits anyway`));
 					}
 					return lines;
 				}
@@ -919,7 +1135,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					const tabs: string[] = ["← "];
 					for (let i = 0; i < questions.length; i++) {
 						const isActive = i === currentTab;
-						const box = isAnswered(i) ? "■" : "□";
+						const box = isAnswered(i) ? "■" : hasNotes(i) ? "✎" : skipped[i] ? "–" : "□";
 						const text = ` ${box} ${questions[i].header} `;
 						const styled = isActive
 							? theme.bg("selectedBg", theme.fg("text", text))
@@ -931,13 +1147,17 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					tabs.push(
 						isSubmitTab
 							? theme.bg("selectedBg", theme.fg("text", submitText))
-							: theme.fg(allAnswered() ? "success" : "dim", submitText),
+							: theme.fg(allSettled() ? "success" : "dim", submitText),
 					);
 					tabs.push(" →");
 					const out: string[] = [];
 					for (const line of wrapTextWithAnsi(tabs.join(""), Math.max(1, width - 1))) out.push(" " + line);
 					out.push("");
 					return out;
+				}
+
+				function remainingAfkMs(): number {
+					return Math.max(0, AFK_TIMEOUT_MS - (Date.now() - lastActivity));
 				}
 
 				function hintLine(width: number): string[] {
@@ -960,10 +1180,15 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 						} else {
 							parts.push("1-9/Enter select");
 						}
-						parts.push("Esc cancel");
+						parts.push("Skip unanswered", "Esc cancel");
 					}
+					const remaining = remainingAfkMs();
+					if (remaining <= AFK_COUNTDOWN_MS) {
+						parts.push(`auto-submit ${Math.ceil(remaining / 1000)}s`);
+					}
+					const color = remaining <= AFK_COUNTDOWN_MS ? "warning" : "dim";
 					const out: string[] = [];
-					for (const line of wrapTextWithAnsi(theme.fg("dim", parts.join(" · ")), Math.max(1, width - 1))) {
+					for (const line of wrapTextWithAnsi(theme.fg(color, parts.join(" · ")), Math.max(1, width - 1))) {
 						out.push(" " + line);
 					}
 					return out;
@@ -995,16 +1220,33 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					return lines;
 				}
 
+				afkTimer = setInterval(() => {
+					if (finished) return;
+					const remaining = remainingAfkMs();
+					if (remaining <= 0) {
+						submitAfk();
+						return;
+					}
+					if (remaining <= AFK_COUNTDOWN_MS) refresh();
+				}, 1000);
+				(afkTimer as { unref?: () => void }).unref?.();
+
 				return {
 					render,
 					invalidate: () => {
 						cachedLines = undefined;
 					},
 					handleInput,
+					dispose: () => {
+						signal?.removeEventListener("abort", onAbort);
+						if (afkTimer !== undefined) clearInterval(afkTimer);
+					},
 				};
 			});
-
-			ctx.ui.setWorkingVisible(true);
+				}
+			} finally {
+				ctx.ui.setWorkingVisible(true);
+			}
 
 			if (result.outcome === "cancelled") {
 				return {
@@ -1021,7 +1263,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 			}
 
 			return {
-				content: [{ type: "text", text: formatAccepted(result.answers) }],
+				content: [{ type: "text", text: formatSubmitted(result) }],
 				details: result,
 			};
 		},
@@ -1049,16 +1291,32 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				}
 				return new Text(theme.fg("warning", "Declined to answer"), 0, 0);
 			}
-			const lines = details.answers.map((a) => {
-				const parts = a.labels.map((l) =>
-					a.customLabels.includes(l) ? `${theme.fg("muted", "(wrote) ")}${l}` : l,
-				);
-				let line = `${theme.fg("success", "✓ ")}${theme.fg("accent", a.header)}: ${parts.join(", ")}`;
-				if (a.notes) line += theme.fg("dim", ` (note: ${a.notes})`);
-				return line;
-			});
+			const lines: string[] = [];
+			if (details.outcome === "afk") {
+				lines.push(theme.fg("warning", "Auto-continued after 5 minutes idle"));
+			}
+			for (const a of details.answers) {
+				if (a.notesOnly) {
+					lines.push(
+						`${theme.fg("muted", "✎ ")}${theme.fg("accent", a.header)}: ${theme.fg("dim", NOTES_ONLY)}` +
+							(a.notes ? theme.fg("dim", ` (note: ${a.notes})`) : ""),
+					);
+				} else if (a.labels.length > 0) {
+					const parts = a.labels.map((l) =>
+						a.customLabels.includes(l) ? `${theme.fg("muted", "(wrote) ")}${l}` : l,
+					);
+					let line = `${theme.fg("success", "✓ ")}${theme.fg("accent", a.header)}: ${parts.join(", ")}`;
+					if (a.notes) line += theme.fg("dim", ` (note: ${a.notes})`);
+					lines.push(line);
+				} else {
+					lines.push(`${theme.fg("dim", "– ")}${theme.fg("accent", a.header)}: ${theme.fg("dim", "(skipped)")}`);
+				}
+			}
 			if (details.outcome === "chat") {
 				lines.push(theme.fg("accent", "→ User wants to chat about this instead"));
+			}
+			if (lines.length === 0) {
+				return new Text(theme.fg("dim", "No options selected"), 0, 0);
 			}
 			return new Text(lines.join("\n"), 0, 0);
 		},
