@@ -8,11 +8,11 @@ A [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) extension 
 
 - **Single question**: numbered option list — press `1`-`9` to pick instantly, or `↑↓` + Enter; single-select submits as soon as you pick
 - **Multiple questions (up to 4)**: tab bar with short header chips (`■` answered / `–` skipped / `✎` notes / `□` unanswered), `Tab`/`←→` to switch, auto-jumps to the next unanswered question, final **Submit** review page — unanswered questions can be skipped; Enter on Submit sends whatever is selected
-- **"Other" built in**: every question gets an inline free-text row — focus it and just start typing. Text persists per question; if you end up picking a regular option instead, your text is attached as a note rather than discarded
-- **multiSelect**: `Space`/`Enter` toggle `[x]`/`[ ]`, an explicit **Next/Submit** button confirms the question — no ambiguous Enter
-- **Option previews**: single-select options can carry a multi-line markdown `preview` (code snippet, mockup, config example) rendered side-by-side with the option list (stacked on narrow terminals); digits move focus for comparing, `Enter` decides, `n` adds a note. The "Other" free-text row stays available too — previews don't take it away
+- **"Type about this" built in**: every question without option previews gets an inline free-text row — focus it and just start typing. Text persists per question; if you end up picking a regular option instead, your text is attached as a note rather than discarded
+- **multiSelect**: `Space`/`Enter` toggle `[x]`/`[ ]`, an explicit **Next/Submit** button confirms the question — no ambiguous Enter. Skip is the other half of that pair: it settles the question *without* a selection
+- **Option previews**: single-select options can carry a multi-line markdown `preview` (code snippet, mockup, config example) rendered side-by-side with the option list (stacked on narrow terminals); digits move focus for comparing, `Enter` decides, `n` adds a note. the focused option's description and the Notes line sit in the preview column, under the box. Preview questions carry no free-text row — typing a fifth answer has nothing to compare against, so `n` notes are the escape hatch there
 - **Skip / partial submit**: every question has a Skip row; you can leave some questions unanswered and still submit. Notes-only (typed a note, picked nothing) is sent as `(notes only)` so the model doesn't treat it as a vote
-- **"Chat about this"**: every question offers an escape hatch that ends the dialog and asks the model to clarify instead — any answers you already picked are carried along
+- **"Chat about this"**: every question offers an escape hatch that ends the dialog and asks the model to clarify instead — any answers you already picked are carried along. A rule sets it apart from the option and action rows, so it never reads as one more option
 - **5-minute idle auto-submit**: if you walk away, the dialog submits whatever is selected so far (last 20s show a countdown). Idle is not treated as "continue with your best judgment"
 - **Model-friendly results**: answers are keyed by the full question text (no chip-label decoding), selected previews and notes are echoed back as annotations. The model sees a different wrap-up depending on the outcome (all answered / partial or notes / idle / empty / cancelled), so a skipped question or a "don't ship this" note is not read as full approval
 - **Input validation**: 1-4 questions with 2-4 options each; duplicate question texts or option labels are rejected with retryable error messages. A question with fewer than 2 options is not a decision — the model is told not to retry and not to invent a filler option, and to take its one path and continue
@@ -59,8 +59,8 @@ Ask pi something ambiguous, e.g.:
 | `↑` `↓` | Move between rows (wraps around; also leaves the inline input, saving your text) |
 | `Home` `End` `PageUp` `PageDown` | Jump to the first / last row |
 | `Enter` | Select (single) / toggle (multiSelect) / confirm on the **Next/Submit** button / save the inline input |
-| `Space` | Toggle option (multiSelect); on the "Other" row, toggle your typed answer in/out |
-| Any character | On the "Other" row: start typing your answer right away |
+| `Space` | Toggle option (multiSelect); on the "Type about this" row, toggle your typed answer in/out |
+| Any character | On the "Type about this" row: start typing your answer right away |
 | `n` | Add a note (preview questions) |
 | Skip row (or its number) | Leave this question unanswered and continue |
 | `Tab` / `←` `→` | Switch questions (multi-question mode) |

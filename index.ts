@@ -5,12 +5,13 @@
  * - Single question: option list; single-select submits on pick
  * - Multiple questions: tab bar (header chips) + Submit review page
  * - Number keys 1-9 select directly (full-width digits normalized)
- * - "Other" is an inline input row: focus it and just start typing
+ * - "Type about this" is an inline input row: focus it and just start typing
  * - Skip: leave a question unanswered and continue (partial submit allowed)
  * - multiSelect: Space/Enter toggle, explicit Next/Submit button confirms
- * - "Chat about this": ends the dialog asking the model to clarify instead
- * - Option previews: side-by-side layout, markdown-rendered; "Other" and
- *   `n` notes both stay available — previews don't remove the escape hatch
+ * - "Chat about this": ends the dialog asking the model to clarify instead;
+ *   a rule sets it apart from the option and action rows above it
+ * - Option previews: side-by-side layout, markdown-rendered; no free-text row
+ *   there — `n` notes are the escape hatch while comparing options
  * - Answers keyed by full question text; notes/preview echoed as annotations
  * - 5-minute idle auto-submits whatever is selected so far
  * - Stable layout: every tab padded to the tallest question's height
@@ -24,6 +25,7 @@ import {
 	Key,
 	Markdown,
 	matchesKey,
+	stripTerminalSequences,
 	Text,
 	truncateToWidth,
 	visibleWidth,
@@ -51,13 +53,13 @@ interface Answer {
 	question: string;
 	/** Selected option labels; a custom-typed answer is included as-is */
 	labels: string[];
-	/** Which labels were custom-typed via "Other" */
+	/** Which labels the user typed on the free-text row */
 	customLabels: string[];
 	/** Free text kept as an annotation (not part of the answer) */
 	notes?: string;
 	/** Preview content of the selected option (single-select only) */
 	preview?: string;
-	/** Notes present, no option or Other picked. Not a vote. */
+	/** Notes present, no option or typed answer picked. Not a vote. */
 	notesOnly?: boolean;
 }
 
@@ -71,10 +73,10 @@ interface AskResult {
 	afkTimeoutMs?: number;
 }
 
-type EditKind = "none" | "other" | "notes";
+type EditKind = "none" | "freetext" | "notes";
 
 interface Row {
-	kind: "option" | "other" | "submit" | "skip" | "chat";
+	kind: "option" | "freetext" | "submit" | "skip" | "chat";
 	optionIndex: number;
 }
 
@@ -206,6 +208,8 @@ function formatChatAboutThis(questions: Question[], answers: Answer[]): string {
 const MAX_QUESTIONS = 4;
 const PREVIEW_MAX_LINES = 12;
 const SIDE_BY_SIDE_MIN_WIDTH = 64;
+/** Label of the inline free-text row, phrased to parallel "Chat about this". */
+const FREETEXT_LABEL = "Type about this";
 
 function errorResult(message: string, questions: Question[] = []) {
 	return {
@@ -254,7 +258,7 @@ function validateQuestions(questions: { question: string; options?: { label: str
 		}
 		if (opts.length > 4) {
 			tooMany ??=
-				`Error: Question "${q.question}" has ${opts.length} option(s). Provide at most 4 options (an "Other" free-text option is added automatically).`;
+				`Error: Question "${q.question}" has ${opts.length} option(s). Provide at most 4 options (a free-text row is added automatically).`;
 			continue;
 		}
 		const labels = new Set<string>();
@@ -300,7 +304,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 		name: "ask_user_question",
 		label: "Ask User Question",
 		description:
-			"Ask the user one or more questions when you are blocked on a decision that is genuinely theirs to make — choosing between approaches, clarifying ambiguous requirements, or picking preferences you cannot infer. Reserve this for decisions where the user's answer changes what you do next — not for choices with a conventional default or facts you can verify in the codebase yourself. In those cases pick the obvious option, mention it in your response, and proceed. Each question shows 2-4 options plus an automatic free-text 'Other' and a Skip action — do not add Other, None, or Skip as options. Use multiSelect for non-exclusive choices. Use option previews (code snippets, mockups) when users need to visually compare concrete artifacts. If you recommend an option, put it first and append ' (Recommended)' to its label. The user may skip questions or submit a partial answer; read skips and notes carefully — they may ask you not to proceed. The user may also chat about the questions instead of answering — treat that as a request for clarification, not a refusal.",
+			"Ask the user one or more questions when you are blocked on a decision that is genuinely theirs to make — choosing between approaches, clarifying ambiguous requirements, or picking preferences you cannot infer. Reserve this for decisions where the user's answer changes what you do next — not for choices with a conventional default or facts you can verify in the codebase yourself. In those cases pick the obvious option, mention it in your response, and proceed. Each question shows 2-4 options plus an automatic free-text row and a Skip action — do not add Other, None, or Skip as options. Questions carrying option previews are for comparing: they drop the free-text row and offer a notes field instead. Use multiSelect for non-exclusive choices. Use option previews (code snippets, mockups) when users need to visually compare concrete artifacts. If you recommend an option, put it first and append ' (Recommended)' to its label. The user may skip questions or submit a partial answer; read skips and notes carefully — they may ask you not to proceed. The user may also chat about the questions instead of answering — treat that as a request for clarification, not a refusal.",
 		parameters: AskParams,
 		executionMode: "sequential",
 
@@ -341,15 +345,15 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				let cachedLines: string[] | undefined;
 				const cursorByQ = questions.map(() => 0);
 				// Sticky "which option's preview is showing" for preview-layout
-				// questions: stays put when focus moves onto Other/Skip/Chat, instead of
+				// questions: stays put when focus moves onto Skip/Chat, instead of
 				// snapping to whichever option happens to sit last in the list.
 				const lastOptionByQ = questions.map(() => 0);
 				const picked = questions.map(() => new Set<number>());
 				const freeform = questions.map(() => "");
 				const freeformSelected = questions.map(() => false);
 				const skipped = questions.map(() => false);
-				// Preview-question "n" notes are a separate field from Other's
-				// freeform text — see rowsFor() for why both now coexist there.
+				// Preview-question "n" notes live in their own field: the free-text
+				// row is absent there, so the two never share storage.
 				const notesText = questions.map(() => "");
 
 				let lastActivity = Date.now();
@@ -379,15 +383,29 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				function rowsFor(qi: number): Row[] {
 					const question = questions[qi];
 					const rows: Row[] = question.options.map((_, oi) => ({ kind: "option", optionIndex: oi }));
-					// Preview layout keeps the "Other" row too: comparing options visually
-					// is not a reason to remove the escape hatch. Claude Code's preview
-					// view drops Other; Grok Build keeps a sticky freeform row regardless
-					// of preview — this follows Grok Build.
-					rows.push({ kind: "other", optionIndex: -1 });
+					// Preview questions have no free-text row: they exist to compare the
+					// concrete artifacts on offer, and a typed answer has none. The `n`
+					// notes line is the escape hatch there instead.
+					if (!hasPreviewLayout(question)) rows.push({ kind: "freetext", optionIndex: -1 });
+					// multiSelect keeps an explicit confirm row so Enter can stay a pure
+					// toggle: "Next" moves on to the following question, "Submit" (when this
+					// question is the whole dialog) sends. Skip is the other thing entirely —
+					// it settles the question without a selection.
 					if (question.multiSelect) rows.push({ kind: "submit", optionIndex: -1 });
 					rows.push({ kind: "skip", optionIndex: -1 });
 					rows.push({ kind: "chat", optionIndex: -1 });
 					return rows;
+				}
+
+				/**
+				 * Digit shown next to a non-option row. Options take 1..k, then the
+				 * free-text row (when present), then Skip and Chat — the Next/Submit
+				 * button is unnumbered, so it does not consume a digit.
+				 */
+				function rowDigit(question: Question, kind: "freetext" | "skip" | "chat"): number {
+					const afterOptions = question.options.length + (hasPreviewLayout(question) ? 0 : 1);
+					if (kind === "freetext") return afterOptions;
+					return kind === "skip" ? afterOptions + 1 : afterOptions + 2;
 				}
 
 				function cursor(): number {
@@ -423,9 +441,12 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					const labels = [...picked[qi]].sort((a, b) => a - b).map((idx) => question.options[idx].label);
 					const text = freeform[qi].trim();
 					const custom = freeformSelected[qi] && text ? [text] : [];
-					const strayOther = text && custom.length === 0 ? text : undefined;
+					// Typed text the user didn't end up voting with rides along as a note
+					// instead of being dropped. Only one source can be set per question:
+					// preview questions have `n` notes and no free-text row, and vice versa.
+					const strayTyped = text && custom.length === 0 ? text : undefined;
 					const noteFromN = notesText[qi].trim() || undefined;
-					const notes = noteFromN && strayOther ? `${noteFromN} / ${strayOther}` : (noteFromN ?? strayOther);
+					const notes = noteFromN ?? strayTyped;
 					let preview: string | undefined;
 					if (!question.multiSelect && picked[qi].size === 1) {
 						preview = question.options[[...picked[qi]][0]].preview;
@@ -444,7 +465,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				}
 
 				function flushEdits() {
-					if (editing === "other") {
+					if (editing === "freetext") {
 						freeform[currentTab] = input.getValue();
 						const text = freeform[currentTab].trim();
 						if (text && picked[currentTab].size === 0) freeformSelected[currentTab] = true;
@@ -556,8 +577,8 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					advanceAfterAnswer();
 				}
 
-				function startOtherEdit(seedData?: string) {
-					editing = "other";
+				function startFreetextEdit(seedData?: string) {
+					editing = "freetext";
 					input.setValue(freeform[currentTab]);
 					input.focused = true;
 					if (seedData) input.handleInput(seedData);
@@ -571,8 +592,8 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					refresh();
 				}
 
-				/** Save inline "Other" text without committing it as the answer. */
-				function saveOtherEdit() {
+				/** Save the inline typed text without committing it as the answer. */
+				function saveFreetextEdit() {
 					const i = currentTab;
 					freeform[i] = input.getValue();
 					const text = freeform[i].trim();
@@ -599,7 +620,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				}
 
 				input.onEscape = () => {
-					if (editing === "other") saveOtherEdit();
+					if (editing === "freetext") saveFreetextEdit();
 					else if (editing === "notes") saveNotesEdit();
 				};
 
@@ -650,9 +671,9 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					const question = q();
 					const k = question.options.length;
 					if (hasPreviewLayout(question)) {
-						// Previews are for comparing: digits only move focus — including
-						// onto the Other/Chat rows, which preview no longer hides. Enter
-						// (or typing, on the Other row) is what actually decides.
+						// Previews are for comparing: digits only move focus (across every
+						// row, Skip and Chat included), Enter is what decides. Row indices
+						// and displayed digits line up here — no free-text row to skip over.
 						const rows = rowsFor(currentTab);
 						if (n - 1 < rows.length) {
 							setCursor(n - 1);
@@ -667,11 +688,11 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 						return;
 					}
 					if (n === k + 1) {
-						// "Other": pre-filled text submits directly, empty focuses the input
+						// Free-text row: pre-filled text submits directly, empty focuses the input
 						const rows = rowsFor(currentTab);
-						setCursor(rows.findIndex((r) => r.kind === "other"));
+						setCursor(rows.findIndex((r) => r.kind === "freetext"));
 						if (!question.multiSelect && freeform[currentTab].trim()) commitCustom();
-						else startOtherEdit();
+						else startFreetextEdit();
 						return;
 					}
 					if (n === k + 2) {
@@ -693,16 +714,16 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 
 				function handleEditingInput(data: string) {
 					bumpActivity();
-					if (editing === "other") {
+					if (editing === "freetext") {
 						if (isMulti && (matchesKey(data, Key.tab) || matchesKey(data, Key.shift("tab")))) {
 							const delta = matchesKey(data, Key.tab) ? 1 : -1;
-							saveOtherEdit();
+							saveFreetextEdit();
 							switchTab(delta);
 							return;
 						}
 						if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
 							const delta = matchesKey(data, Key.up) ? -1 : 1;
-							saveOtherEdit();
+							saveFreetextEdit();
 							const rows = rowsFor(currentTab);
 							setCursor((cursor() + delta + rows.length) % rows.length);
 							refresh();
@@ -775,17 +796,17 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					const row = rows[cursor()];
 					const ch = printableChar(data);
 
-					// Space: toggle (multiSelect), or activate the Other input.
+					// Space: toggle (multiSelect), or activate the free-text input.
 					// matchesKey handles legacy " " and Kitty CSI; full-width space normalized too.
 					if (matchesKey(data, Key.space) || ch === "　") {
 						if (row.kind === "option" && question.multiSelect) {
 							toggleOption(row.optionIndex);
-						} else if (row.kind === "other") {
+						} else if (row.kind === "freetext") {
 							if (question.multiSelect && freeform[currentTab].trim()) {
 								freeformSelected[currentTab] = !freeformSelected[currentTab];
 								refresh();
 							} else {
-								startOtherEdit();
+								startFreetextEdit();
 							}
 						}
 						return;
@@ -797,8 +818,8 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 								if (question.multiSelect) toggleOption(row.optionIndex);
 								else commitOption(row.optionIndex);
 								return;
-							case "other":
-								startOtherEdit();
+							case "freetext":
+								startFreetextEdit();
 								return;
 							case "submit":
 								pressSubmitRow();
@@ -813,9 +834,9 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					}
 
 					if (ch) {
-						// Typing on the Other row starts editing with that character
-						if (row.kind === "other") {
-							startOtherEdit(data);
+						// Typing on the free-text row starts editing with that character
+						if (row.kind === "freetext") {
+							startFreetextEdit(data);
 							return;
 						}
 						if (ch === "n" && hasPreviewLayout(question)) {
@@ -835,32 +856,45 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				function previewBoxLines(qi: number, oi: number, width: number): string[] {
 					const opt = questions[qi].options[oi];
 					if (!opt?.preview) return [];
-					const innerW = Math.max(1, width - 2);
+					const innerW = Math.max(1, width - 4);
 					const key = `${qi}:${oi}:${innerW}`;
 					let md = mdCache.get(key);
 					if (!md) {
-						md = new Markdown(opt.preview, 0, 0, mdTheme).render(innerW);
+						md = new Markdown(opt.preview, 0, 0, mdTheme).render(innerW)
+							// The markdown renderer keeps ``` fence markers as visible text
+							// (they are a border in a chat transcript). Inside a box of our
+							// own they are just noise, so drop those rows.
+							.filter((line) => !/^`{3,}[\w+-]*$/.test(stripTerminalSequences(line).trim()));
+						while (md.length > 0 && visibleWidth(md[md.length - 1].trim()) === 0) md.pop();
 						mdCache.set(key, md);
 					}
 					const shown = md.slice(0, PREVIEW_MAX_LINES);
 					const hidden = md.length - shown.length;
+					const bar = theme.fg("dim", "│");
+					// Closed box: the right edge tells you where a truncated preview line ends.
+					const row = (content: string) => `${bar} ${truncateToWidth(content, innerW, "…", true)} ${bar}`;
 					const out: string[] = [];
-					out.push(theme.fg("dim", `┌ preview ${"─".repeat(Math.max(0, width - 10))}`));
-					for (const line of shown) {
-						out.push(theme.fg("dim", "│ ") + truncateToWidth(line, innerW));
-					}
-					if (hidden > 0) {
-						out.push(theme.fg("dim", `│ … +${hidden} more lines`));
-					}
-					out.push(theme.fg("dim", `└${"─".repeat(Math.max(0, width - 1))}`));
+					out.push(theme.fg("dim", `┌ preview ${"─".repeat(Math.max(0, width - 11))}┐`));
+					for (const line of shown) out.push(row(line));
+					if (hidden > 0) out.push(row(theme.fg("dim", `… +${hidden} more lines`)));
+					out.push(theme.fg("dim", `└${"─".repeat(Math.max(0, width - 2))}┘`));
 					return out;
+				}
+
+				/**
+				 * The typed text as its own field. Input.render() hardcodes a "> " prompt,
+				 * which reads as a second cursor next to the reverse-video one it draws —
+				 * strip it and let the text stand alone. The +2 keeps the field width right.
+				 */
+				function inputLine(width: number): string {
+					const line = input.render(Math.max(4, width) + 2)[0] ?? "";
+					return line.startsWith("> ") ? line.slice(2) : line;
 				}
 
 				function notesLine(qi: number, width: number, editingNotes: boolean): string {
 					const label = theme.fg("accent", "Notes: ");
 					if (editingNotes) {
-						const inputLine = input.render(Math.max(4, width - visibleWidth("Notes: ")))[0] ?? "";
-						return label + inputLine;
+						return label + inputLine(width - visibleWidth("Notes: "));
 					}
 					const text = notesText[qi].trim();
 					const body = text
@@ -903,11 +937,10 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					return lines;
 				}
 
-				function otherRowLine(question: Question, focused: boolean, isEditing: boolean, width: number): string {
+				function freetextRowLine(question: Question, focused: boolean, isEditing: boolean, width: number): string {
 					const qi = currentTabForRender;
-					const k = question.options.length;
 					const pointer = focused ? theme.fg("accent", "❯ ") : "  ";
-					const num = theme.fg("dim", `${k + 1}. `);
+					const num = theme.fg("dim", `${rowDigit(question, "freetext")}. `);
 					let marker = "";
 					if (question.multiSelect) {
 						marker = freeformSelected[qi] && freeform[qi].trim()
@@ -917,25 +950,25 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					const prefix = pointer + num + marker;
 					const prefixW = visibleWidth(prefix);
 					const avail = Math.max(4, width - prefixW);
+					// No label in front of the input or the saved text: what the person
+					// typed is the answer, and a "Type:" prefix only eats width.
 					if (isEditing) {
-						const label = theme.fg("accent", "Other: ");
-						const inputLine = input.render(Math.max(4, avail - visibleWidth("Other: ")))[0] ?? "";
-						return prefix + label + inputLine;
+						return prefix + inputLine(avail);
 					}
 					const text = freeform[qi].trim();
 					if (!text) {
-						const label = theme.fg(focused ? "accent" : "text", "Other");
-						const hint = theme.fg("dim", " — type your own answer");
-						return prefix + truncateToWidth(label + hint, avail);
+						// Dim: the row is an invitation, not one of the answers on offer.
+						return prefix + truncateToWidth(theme.fg(focused ? "accent" : "dim", FREETEXT_LABEL), avail);
 					}
-					const label = theme.fg(focused ? "accent" : "text", "Other: ");
-					let body: string;
-					if (freeformSelected[qi]) {
-						body = theme.fg("text", text) + theme.fg("success", " ✓");
-					} else {
-						body = theme.fg("muted", text) + theme.fg("dim", " (kept as note)");
-					}
-					return prefix + truncateToWidth(label + body, avail);
+					const body = freeformSelected[qi]
+						? theme.fg("text", text) + theme.fg("success", " ✓")
+						: theme.fg("muted", text) + theme.fg("dim", " (kept as note)");
+					return prefix + truncateToWidth(body, avail);
+				}
+
+				/** Rule that sets "Chat about this" apart from the rows above it. */
+				function separatorLine(width: number): string {
+					return theme.fg("dim", "─".repeat(Math.max(1, width)));
 				}
 
 				// The row-rendering helpers need the question index being rendered
@@ -989,7 +1022,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 									}),
 								);
 							}
-							// Once focus moves past the option list (onto Other/Chat), keep
+							// Once focus moves past the option list (onto Skip/Chat), keep
 							// showing the last option actually looked at (lastOptionByQ) rather
 							// than snapping to whichever option is last in the array.
 							const focusedOption = view.focusRow < question.options.length ? view.focusRow : lastOptionByQ[qi];
@@ -998,28 +1031,30 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 							for (let t = 0; t < rowCount; t++) {
 								lines.push(padToWidth(left[t] ?? "", leftW) + "   " + (right[t] ?? ""));
 							}
-							lines.push("");
-							lines.push(" " + notesLine(qi, width - 1, view.editingKind === "notes"));
-							// Focused option's description below the panel (full width)
+							// The focused option's description and the Notes line both belong to
+							// the option whose preview is showing, so they stay in the preview
+							// column, under the box, instead of drifting to the far left.
+							const gutter = " ".repeat(leftW + 3);
 							const desc = question.options[focusedOption]?.description;
-							if (desc) addWrapped(theme.fg("muted", desc), "   ");
+							if (desc) {
+								for (const line of wrapTextWithAnsi(theme.fg("muted", desc), rightW)) lines.push(gutter + line);
+							}
 							lines.push("");
-							// No leading space here: otherRowLine's own pointer ("❯ "/"  ") is the
-							// row indent, same as the option rows above and the chat row below —
-							// an extra space would shift its pointer one column out of line.
-							const otherRowIndex = rows.findIndex((r) => r.kind === "other");
-							const otherFocused = view.focusRow === otherRowIndex;
-							lines.push(otherRowLine(question, otherFocused, otherFocused && view.editingKind === "other", width));
+							lines.push(gutter + notesLine(qi, rightW, view.editingKind === "notes"));
 							lines.push("");
+							// No leading space on the action rows: their own pointer ("❯ "/"  ")
+							// is the indent, same as the option rows above — an extra space would
+							// shift the pointer one column out of line.
 							const skipFocused = rows[view.focusRow]?.kind === "skip";
 							const skipPointer = skipFocused ? theme.fg("accent", "❯ ") : "  ";
-							const skipNum = theme.fg("dim", `${question.options.length + 2}. `);
+							const skipNum = theme.fg("dim", `${rowDigit(question, "skip")}. `);
 							const skipLabel = skipped[qi] ? "Skip ✓" : "Skip";
 							lines.push(skipPointer + skipNum + theme.fg(skipFocused ? "accent" : "muted", skipLabel));
 							lines.push("");
+							lines.push(separatorLine(width));
 							const chatFocused = rows[view.focusRow]?.kind === "chat";
 							const chatPointer = chatFocused ? theme.fg("accent", "❯ ") : "  ";
-							const chatNum = theme.fg("dim", `${question.options.length + 3}. `);
+							const chatNum = theme.fg("dim", `${rowDigit(question, "chat")}. `);
 							lines.push(chatPointer + chatNum + theme.fg(chatFocused ? "accent" : "muted", "Chat about this"));
 							return lines;
 						}
@@ -1027,6 +1062,18 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 						for (let r = 0; r < rows.length; r++) {
 							const row = rows[r];
 							const focused = view.focusRow === r;
+							// Stacked preview (narrow terminal): the box and the notes line sit
+							// between the option rows and the action rows. Notes render even when
+							// the focused option has no preview, matching the side-by-side layout.
+							if (preview && r === question.options.length) {
+								const focusedOption = view.focusRow < question.options.length ? view.focusRow : lastOptionByQ[qi];
+								const box = previewBoxLines(qi, focusedOption, Math.max(10, width - 2));
+								lines.push("");
+								for (const line of box) lines.push(" " + line);
+								lines.push("");
+								lines.push(" " + notesLine(qi, width - 1, view.editingKind === "notes"));
+								lines.push("");
+							}
 							switch (row.kind) {
 								case "option":
 									lines.push(
@@ -1037,19 +1084,10 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 										}),
 									);
 									break;
-								case "other":
-									// Stacked preview (narrow terminal): box + notes sit above the Other row.
-									// Notes always render here (even with no preview box) to match the
-									// side-by-side layout, which never hides the Notes line either.
-									if (preview) {
-										const focusedOption = view.focusRow < question.options.length ? view.focusRow : lastOptionByQ[qi];
-										const box = previewBoxLines(qi, focusedOption, Math.max(10, width - 2));
-										lines.push("");
-										for (const line of box) lines.push(" " + line);
-										lines.push(" " + notesLine(qi, width - 1, view.editingKind === "notes"));
-										lines.push("");
-									}
-									lines.push(otherRowLine(question, focused, focused && view.editingKind === "other", width));
+								case "freetext":
+									lines.push(
+										freetextRowLine(question, focused, focused && view.editingKind === "freetext", width),
+									);
 									break;
 								case "submit": {
 									const label = isMulti ? "Next" : "Submit";
@@ -1060,14 +1098,16 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 								}
 								case "skip": {
 									const pointer = focused ? theme.fg("accent", "❯ ") : "  ";
-									const num = theme.fg("dim", `${question.options.length + 2}. `);
+									const num = theme.fg("dim", `${rowDigit(question, "skip")}. `);
 									const label = skipped[qi] ? "Skip ✓" : "Skip";
 									lines.push(pointer + num + theme.fg(focused ? "accent" : "muted", label));
 									break;
 								}
 								case "chat": {
 									const pointer = focused ? theme.fg("accent", "❯ ") : "  ";
-									const num = theme.fg("dim", `${question.options.length + 3}. `);
+									const num = theme.fg("dim", `${rowDigit(question, "chat")}. `);
+									lines.push("");
+									lines.push(separatorLine(width));
 									lines.push(pointer + num + theme.fg(focused ? "accent" : "muted", "Chat about this"));
 									break;
 								}
@@ -1162,7 +1202,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 
 				function hintLine(width: number): string[] {
 					let parts: string[];
-					if (editing === "other") {
+					if (editing === "freetext") {
 						parts = ["Enter save", "Esc back", "↑↓ move away"];
 					} else if (editing === "notes") {
 						parts = ["Enter/Esc save note"];
