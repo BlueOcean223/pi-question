@@ -4,8 +4,15 @@
   "description": "AskUserQuestion tool for pi: single/multi questions, multiSelect, previews, tab navigation",
   "license": "MIT",
   "type": "module",
+  "scripts": {
+    "test": "bun test ./*.test.ts",
+    "typecheck": "bun x tsc --noEmit"
+  },
   "pi": {
     "extensions": ["./index.ts"]
   },
-  "keywords": ["pi", "pi-coding-agent", "ask-user-question", "questionnaire", "tui"]
+  "keywords": ["pi", "pi-coding-agent", "ask-user-question", "questionnaire", "tui"],
+  "devDependencies": {
+    "@types/bun": "^1.4.0"
+  }
 }
