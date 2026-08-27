@@ -1,17 +1,51 @@
 {
   "name": "pi-question",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "AskUserQuestion tool for pi: single/multi questions, multiSelect, previews, tab navigation",
   "license": "MIT",
+  "author": "BlueOcean223",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BlueOcean223/pi-question.git"
+  },
+  "homepage": "https://github.com/BlueOcean223/pi-question#readme",
+  "bugs": {
+    "url": "https://github.com/BlueOcean223/pi-question/issues"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "test": "bun test ./*.test.ts",
-    "typecheck": "bun x tsc --noEmit"
+    "typecheck": "bun x tsc --noEmit",
+    "verify-pack": "node scripts/verify-pack.mjs",
+    "prepublishOnly": "bun run test && bun run typecheck && bun run verify-pack"
   },
   "pi": {
+    "image": "https://raw.githubusercontent.com/BlueOcean223/pi-question/main/public/single-select.png",
     "extensions": ["./index.ts"]
   },
-  "keywords": ["pi", "pi-coding-agent", "ask-user-question", "questionnaire", "tui"],
+  "files": [
+    "index.ts",
+    "dialog.ts",
+    "format.ts",
+    "keys.ts",
+    "layout.ts",
+    "prompt.ts",
+    "reconcile.ts",
+    "rows.ts",
+    "text-input.ts",
+    "types.ts",
+    "validate.ts",
+    "README.zh-CN.md"
+  ],
+  "keywords": ["pi-package", "pi", "pi-coding-agent", "ask-user-question", "questionnaire", "tui"],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
   "devDependencies": {
     "@types/bun": "^1.4.0"
   }

@@ -34,27 +34,27 @@
 
 ## 安装
 
-先克隆本仓库：
+```bash
+pi install npm:pi-question
+```
+
+然后重启 pi，或在会话内执行 `/reload`。加 `-l` 可以装到项目里（写 `.pi/settings.json`）而不是全局；卸载用 `pi remove npm:pi-question`。
+
+只想临时试一次、不写进配置：
+
+```bash
+pi -e npm:pi-question
+```
+
+**从源码安装（开发用）**
 
 ```bash
 git clone https://github.com/BlueOcean223/pi-question.git
 cd pi-question
+pi install "$(pwd)"
 ```
 
-**方式 A —— 软链到全局扩展目录（推荐，便于开发）**
-
-```bash
-mkdir -p ~/.pi/agent/extensions
-ln -sfn "$(pwd)" ~/.pi/agent/extensions/pi-question
-```
-
-然后重启 pi，或在会话内执行 `/reload`。
-
-**方式 B —— 临时加载**
-
-```bash
-pi -e "$(pwd)/index.ts"
-```
+本地路径只会写进设置、不会被复制，所以改完代码 `/reload` 一下就生效。
 
 ## 试一试
 

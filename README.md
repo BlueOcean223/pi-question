@@ -34,27 +34,27 @@ A [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) extension 
 
 ## Installation
 
-Clone this repo first:
+```bash
+pi install npm:pi-question
+```
+
+Restart pi, or run `/reload` inside a session. Add `-l` to install into the project (`.pi/settings.json`) instead of globally, and `pi remove npm:pi-question` to uninstall.
+
+To try it for a single run without installing:
+
+```bash
+pi -e npm:pi-question
+```
+
+**From source (for development)**
 
 ```bash
 git clone https://github.com/BlueOcean223/pi-question.git
 cd pi-question
+pi install "$(pwd)"
 ```
 
-**Option A — Symlink into global extensions (recommended for development)**
-
-```bash
-mkdir -p ~/.pi/agent/extensions
-ln -sfn "$(pwd)" ~/.pi/agent/extensions/pi-question
-```
-
-Then restart pi, or run `/reload` inside a session.
-
-**Option B — Load ad-hoc**
-
-```bash
-pi -e "$(pwd)/index.ts"
-```
+A local path is added to settings without copying, so edits apply on the next `/reload`.
 
 ## Try it
 
