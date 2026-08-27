@@ -35,15 +35,15 @@
 ## 安装
 
 ```bash
-pi install npm:pi-question
+pi install npm:@blueocean223/pi-question
 ```
 
-然后重启 pi，或在会话内执行 `/reload`。加 `-l` 可以装到项目里（写 `.pi/settings.json`）而不是全局；卸载用 `pi remove npm:pi-question`。
+然后重启 pi，或在会话内执行 `/reload`。加 `-l` 可以装到项目里（写 `.pi/settings.json`）而不是全局；卸载用 `pi remove npm:@blueocean223/pi-question`。
 
 只想临时试一次、不写进配置：
 
 ```bash
-pi -e npm:pi-question
+pi -e npm:@blueocean223/pi-question
 ```
 
 **从源码安装（开发用）**

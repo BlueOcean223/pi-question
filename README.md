@@ -35,15 +35,15 @@ A [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) extension 
 ## Installation
 
 ```bash
-pi install npm:pi-question
+pi install npm:@blueocean223/pi-question
 ```
 
-Restart pi, or run `/reload` inside a session. Add `-l` to install into the project (`.pi/settings.json`) instead of globally, and `pi remove npm:pi-question` to uninstall.
+Restart pi, or run `/reload` inside a session. Add `-l` to install into the project (`.pi/settings.json`) instead of globally, and `pi remove npm:@blueocean223/pi-question` to uninstall.
 
 To try it for a single run without installing:
 
 ```bash
-pi -e npm:pi-question
+pi -e npm:@blueocean223/pi-question
 ```
 
 **From source (for development)**

@@ -1,5 +1,5 @@
 {
-  "name": "pi-question",
+  "name": "@blueocean223/pi-question",
   "version": "1.0.0",
   "description": "AskUserQuestion tool for pi: single/multi questions, multiSelect, previews, tab navigation",
   "license": "MIT",
@@ -15,6 +15,9 @@
   },
   "engines": {
     "node": ">=22.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "test": "bun test ./*.test.ts",
