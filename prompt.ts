@@ -22,8 +22,8 @@ export const PROMPT_SNIPPET = "Ask the user to choose between written-out option
 
 export const PROMPT_GUIDELINES: string[] = [
 	`Call ask_user_question when the task hides a decision that is genuinely the user's: competing approaches with real trade-offs, a requirement the codebase cannot answer, a preference with no conventional default. If you can verify the answer yourself, or one option is the obvious default, decide it, say so in one line, and keep going — asking about those is the more annoying failure.`,
-	`Spend the interruption once: put every open decision into a single ask_user_question call of up to ${MAX_QUESTIONS} questions rather than stacking calls turn after turn.`,
-	`An ask_user_question answer can come back partial — questions skipped, notes attached instead of a choice, or a request to talk it through instead. Act on what it actually says; a skip or a note is not approval to proceed on that point.`,
+	`Spend the interruption once: do everything that does not depend on the answer first, then raise every open decision in a single ask_user_question call of up to ${MAX_QUESTIONS} questions rather than stacking calls turn after turn.`,
+	`An ask_user_question answer can come back partial — questions skipped, notes attached instead of a choice, an answer typed in the user's own words, or a request to talk it through instead. Act on what it actually says; a skip or a note is not approval to proceed on that point.`,
 	`When you ask with ask_user_question, lead with your own read: unless the choice is purely the user's taste, make the option you would pick the first one and append " (Recommended)" to its label. Laying out options as equals when you do not think they are equal just hands the work back.`,
 ];
 
@@ -49,7 +49,8 @@ An option may carry 'preview': multi-line markdown (code snippet, ASCII mockup, 
 READING THE RESULT
 Answers come back keyed by the full question text, with the selected option's preview and any notes echoed alongside. The reply also tells you how the dialog ended, and these are not equivalent:
 - Fully answered: proceed on those answers.
-- Partial, skipped, or notes only: the user withheld something on purpose. Do not quietly fill the gap with your own preference, and read the notes — they may tell you not to proceed at all.
+- Typed, not chosen: an answer marked as typed by the user is their own wording, not one of your options. It is as likely to be an instruction ("check the schema first", "neither — do X") as a choice. Follow it literally rather than mapping it onto the nearest option you wrote.
+- Partial, skipped, or notes only — including a submit with nothing answered at all: the user withheld something on purpose. Do not quietly fill the gap with your own preference, and read the notes — they may tell you not to proceed at all.
 - Declined: continue with your best judgment or ask different questions. Do not immediately re-ask the same ones.
 - Chat: the user wants to discuss it. Ask what they would like to clarify. This is a request for conversation, not a refusal.
 - Idle auto-continue: nobody was at the keyboard. Treat whatever was selected as a weak signal, not as consent.`;

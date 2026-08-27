@@ -35,6 +35,16 @@ export function formatAnswerEntry(answer: Answer): string | null {
 			? `"${answer.question}"="${answer.labels.join(", ")}"`
 			: `"${answer.question}"=(no option selected)`,
 	];
+	// A typed answer reads exactly like a label the model wrote, so say which it
+	// was. The two are not interchangeable: typed text is often an instruction,
+	// not a pick from the list.
+	if (answer.customLabels.length > 0) {
+		parts.push(
+			answer.customLabels.length === answer.labels.length
+				? "(typed by the user, not one of your options)"
+				: `(typed by the user, not one of your options: ${answer.customLabels.join(", ")})`,
+		);
+	}
 	if (answer.preview) parts.push(`selected preview:\n${answer.preview}`);
 	if (answer.notes) parts.push(`user notes: ${answer.notes}`);
 	return parts.join(" ");

@@ -51,6 +51,10 @@ describe("PROMPT_GUIDELINES", () => {
 		expect(PROMPT_GUIDELINES.join("\n")).toMatch(/not approval/i);
 	});
 
+	test("says when to ask, not only whether — the unblocked work comes first", () => {
+		expect(PROMPT_GUIDELINES.join("\n")).toMatch(/does not depend on the answer/i);
+	});
+
 	test("tells the model to bring its own recommendation, not merely how to format one", () => {
 		// Both surfaces once said only "if you recommend an option, put it first",
 		// which never asks the model to have a view in the first place.
@@ -76,7 +80,7 @@ describe("TOOL_DESCRIPTION", () => {
 	});
 
 	test("explains every outcome — misreading one of these is the expensive failure", () => {
-		for (const outcome of ["Fully answered", "Partial", "Declined", "Chat", "Idle auto-continue"]) {
+		for (const outcome of ["Fully answered", "Typed, not chosen", "Partial", "Declined", "Chat", "Idle auto-continue"]) {
 			expect(TOOL_DESCRIPTION).toContain(outcome);
 		}
 	});

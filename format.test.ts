@@ -40,6 +40,18 @@ describe("formatAnswerEntry", () => {
 		);
 	});
 
+	test("a typed answer says it was typed — it is not a label the model wrote", () => {
+		expect(formatAnswerEntry(answer("Which?", { labels: ["hold on"], customLabels: ["hold on"] }))).toBe(
+			'"Which?"="hold on" (typed by the user, not one of your options)',
+		);
+	});
+
+	test("a typed answer alongside picked options names which one was typed", () => {
+		expect(formatAnswerEntry(answer("Which?", { labels: ["A", "and Redis"], customLabels: ["and Redis"] }))).toBe(
+			'"Which?"="A, and Redis" (typed by the user, not one of your options: and Redis)',
+		);
+	});
+
 	test("notes ride along as an annotation, not as the answer", () => {
 		expect(formatAnswerEntry(answer("Which?", { labels: ["A"], notes: "but check perf" }))).toBe(
 			'"Which?"="A" user notes: but check perf',
