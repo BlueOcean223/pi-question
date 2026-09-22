@@ -85,6 +85,14 @@ describe("TOOL_DESCRIPTION", () => {
 		}
 	});
 
+	test("says attached images arrive as blocks after the text, in a stated order", () => {
+		// Image blocks come through anonymous; without this the model has no way
+		// to tell which question the second screenshot belongs to.
+		expect(TOOL_DESCRIPTION).toContain("ATTACHED IMAGES");
+		expect(TOOL_DESCRIPTION).toMatch(/image blocks after the text/i);
+		expect(TOOL_DESCRIPTION).toMatch(/in the order they appear/i);
+	});
+
 	test("quotes the same limits the schema and validator enforce", () => {
 		expect(TOOL_DESCRIPTION).toContain(`up to ${MAX_QUESTIONS} multiple-choice questions`);
 		expect(TOOL_DESCRIPTION).toContain(`${MIN_OPTIONS}-${MAX_OPTIONS} options per question`);

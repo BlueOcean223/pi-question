@@ -8,6 +8,10 @@
  * instead of pushing its own header off the top of the screen.
  */
 
+import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import {
@@ -21,7 +25,9 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import { extensionFromMagic, readClipboardImage, readClipboardText } from "./clipboard.js";
 import { AFK_COUNTDOWN_MS, AFK_TIMEOUT_MS } from "./format.js";
+import { attachedPaths, attachmentLabel, resolveImagePath } from "./images.js";
 import { COLLAPSE_KEY, createKeymap, formatKeySpec, type KeybindingMatcher, type Keymap } from "./keys.js";
 import {
 	bodyHeightCap,
@@ -48,6 +54,8 @@ type EditKind = "none" | "freetext" | "notes";
 export interface DialogDeps {
 	questions: Question[];
 	signal?: AbortSignal;
+	/** Session working directory — what a relative image path resolves against. */
+	cwd: string;
 	/** Pi's configured `$EDITOR` command, or undefined when none is set. */
 	externalEditorCommand(): string | undefined;
 	notify(message: string, type?: "info" | "warning" | "error"): void;
@@ -81,7 +89,7 @@ function padToWidth(s: string, width: number): string {
 }
 
 export function createDialog(deps: DialogDeps) {
-	const { questions, signal, externalEditorCommand, notify } = deps;
+	const { questions, signal, cwd, externalEditorCommand, notify } = deps;
 
 	return (tui: TUI, theme: Theme, kb: KeybindingMatcher | undefined, done: (r: AskResult) => void): DialogComponent => {
 		const keys: Keymap = createKeymap(kb);
@@ -168,6 +176,38 @@ export function createDialog(deps: DialogDeps) {
 			return undefined;
 		}
 
+		// ---- Image attachments ----
+
+		// Rendering re-reads the fields on every keystroke, so the filesystem
+		// lookup behind "is this token a real file" is answered once per token.
+		const resolvedPaths = new Map<string, string | undefined>();
+
+		function resolveCached(candidate: string, base: string): string | undefined {
+			if (resolvedPaths.has(candidate)) return resolvedPaths.get(candidate);
+			const resolved = resolveImagePath(candidate, base);
+			resolvedPaths.set(candidate, resolved);
+			return resolved;
+		}
+
+		/** Image files named across the given field texts, in order, deduped. */
+		function imagePathsIn(...texts: string[]): string[] {
+			const paths: string[] = [];
+			for (const text of texts) {
+				for (const path of attachedPaths(text, cwd, resolveCached)) {
+					if (!paths.includes(path)) paths.push(path);
+				}
+			}
+			return paths;
+		}
+
+		/** The `📎 name.png` confirmation drawn under a field. */
+		function attachmentLines(text: string, indent: number, width: number): string[] {
+			const avail = Math.max(4, width - indent);
+			return imagePathsIn(text).map(
+				(path) => " ".repeat(indent) + theme.fg("dim", truncateToWidth(`📎 ${attachmentLabel(path)}`, avail)),
+			);
+		}
+
 		// ---- Question/row model ----
 
 		function q(i: number = currentTab): Question {
@@ -219,6 +259,9 @@ export function createDialog(deps: DialogDeps) {
 			}
 			const chosen = [...labels, ...custom];
 			const notesOnly = chosen.length === 0 && !!notes;
+			// Both fields, whatever each one ended up being used for: a path typed
+			// as the answer attaches just as much as one written in a note.
+			const attachments = imagePathsIn(freeformText(qi), notesText(qi));
 			return {
 				header: question.header,
 				question: question.question,
@@ -227,6 +270,7 @@ export function createDialog(deps: DialogDeps) {
 				...(notesOnly ? { notesOnly: true } : {}),
 				...(notes ? { notes } : {}),
 				...(preview ? { preview } : {}),
+				...(attachments.length > 0 ? { attachments } : {}),
 			};
 		}
 
@@ -409,6 +453,63 @@ export function createDialog(deps: DialogDeps) {
 			refresh();
 		}
 
+		let pasting = false;
+
+		/**
+		 * Attach whatever image the clipboard holds, falling back to its text.
+		 *
+		 * A terminal cannot deliver bytes through a paste, so the image is written
+		 * to a temporary file and its path inserted as ordinary text. A file
+		 * dragged onto the terminal arrives as a path already, so from here on
+		 * both are the same thing.
+		 *
+		 * The clipboard is read before any field is opened: the read can take a
+		 * moment, and whichever field is focused when the text is ready is the one
+		 * that gets it.
+		 */
+		async function pasteFromClipboard() {
+			if (pasting) return;
+			pasting = true;
+			try {
+				const bytes = await readClipboardImage();
+				const text = bytes ? undefined : await readClipboardText();
+				if (finished) return;
+				if (!bytes && !text) {
+					notify("The clipboard holds no image or text", "info");
+					return;
+				}
+				if (editing === "none") {
+					if (hasPreviewLayout(q())) startNotesEdit();
+					else startFreetextEdit();
+				}
+				const ed = activeEditor();
+				if (!ed) return;
+				if (bytes) {
+					const file = join(tmpdir(), `pi-question-${randomUUID()}.${extensionFromMagic(bytes)}`);
+					writeFileSync(file, bytes);
+					insertAtCursor(ed, file);
+				} else if (text) {
+					insertAtCursor(ed, text);
+				}
+				refresh();
+			} catch (error) {
+				notify(`Could not paste from the clipboard: ${error instanceof Error ? error.message : String(error)}`, "error");
+			} finally {
+				pasting = false;
+			}
+		}
+
+		/** Insert with a space where the text would otherwise run into a word. */
+		function insertAtCursor(ed: Editor, text: string) {
+			const buffer = displayText(ed);
+			const at = cursorOffset(ed);
+			const before = buffer.slice(Math.max(0, at - 1), at);
+			const after = buffer.slice(at, at + 1);
+			const lead = before !== "" && !/\s/.test(before) ? " " : "";
+			const trail = after !== "" && !/\s/.test(after) ? " " : "";
+			ed.insertTextAtCursor(lead + text + trail);
+		}
+
 		function switchTab(delta: number) {
 			currentTab = (currentTab + delta + totalTabs) % totalTabs;
 			refresh();
@@ -499,6 +600,10 @@ export function createDialog(deps: DialogDeps) {
 				void openExternalEditor();
 				return;
 			}
+			if (keys.pasteImage(data)) {
+				void pasteFromClipboard();
+				return;
+			}
 			if (keys.confirm(data)) {
 				if (editing === "notes") saveEdit();
 				else confirmFreetext();
@@ -581,6 +686,12 @@ export function createDialog(deps: DialogDeps) {
 
 			const question = q();
 			const rows = rowsFor(question);
+
+			// Attaching does not need the field open first: the paste opens it.
+			if (keys.pasteImage(data)) {
+				void pasteFromClipboard();
+				return;
+			}
 
 			if (keys.up(data)) {
 				setCursor((cursor() - 1 + rows.length) % rows.length);
@@ -687,21 +798,25 @@ export function createDialog(deps: DialogDeps) {
 		function notesLine(qi: number, width: number, editingNotes: boolean): string[] {
 			const label = theme.fg("accent", "Notes: ");
 			const labelW = visibleWidth("Notes: ");
+			const attached = attachmentLines(notesText(qi), labelW, width);
 			if (editingNotes) {
-				return renderInlineBuffer({
-					buffer: notesDisplay(qi),
-					cursorOffset: cursorOffset(notesEditor(qi)),
-					focused: true,
-					prefix: label,
-					continuationPrefix: " ".repeat(labelW),
-					contentWidth: Math.max(4, width - labelW),
-				});
+				return [
+					...renderInlineBuffer({
+						buffer: notesDisplay(qi),
+						cursorOffset: cursorOffset(notesEditor(qi)),
+						focused: true,
+						prefix: label,
+						continuationPrefix: " ".repeat(labelW),
+						contentWidth: Math.max(4, width - labelW),
+					}),
+					...attached,
+				];
 			}
 			const text = notesDisplay(qi).trim();
 			const body = text
 				? theme.italic(theme.fg("muted", truncateToWidth(text.replace(/\n/g, " "), Math.max(4, width - labelW))))
 				: theme.fg("dim", "press n to add notes");
-			return [label + body];
+			return [label + body, ...attached];
 		}
 
 		function optionRowLines(
@@ -749,17 +864,21 @@ export function createDialog(deps: DialogDeps) {
 			const prefix = pointer + num + marker;
 			const prefixW = visibleWidth(prefix);
 			const avail = Math.max(4, width - prefixW);
+			const attached = attachmentLines(freeformText(qi), prefixW, width);
 			// No label in front of the input or the saved text: what the person
 			// typed is the answer, and a "Type:" prefix only eats width.
 			if (isEditing) {
-				return renderInlineBuffer({
-					buffer: freeformDisplay(qi),
-					cursorOffset: cursorOffset(freeEditor(qi)),
-					focused: true,
-					prefix,
-					continuationPrefix: " ".repeat(prefixW),
-					contentWidth: avail,
-				});
+				return [
+					...renderInlineBuffer({
+						buffer: freeformDisplay(qi),
+						cursorOffset: cursorOffset(freeEditor(qi)),
+						focused: true,
+						prefix,
+						continuationPrefix: " ".repeat(prefixW),
+						contentWidth: avail,
+					}),
+					...attached,
+				];
 			}
 			const text = freeformDisplay(qi).trim();
 			if (!text) {
@@ -770,7 +889,7 @@ export function createDialog(deps: DialogDeps) {
 			const body = freeformSelected[qi]
 				? theme.fg("text", flat) + theme.fg("success", " ✓")
 				: theme.fg("muted", flat) + theme.fg("dim", " (kept as note)");
-			return [prefix + truncateToWidth(body, avail)];
+			return [prefix + truncateToWidth(body, avail), ...attached];
 		}
 
 		/** Rule that sets "Chat about this" apart from the rows above it. */
@@ -934,7 +1053,8 @@ export function createDialog(deps: DialogDeps) {
 			lines.push("");
 			for (let i = 0; i < questions.length; i++) {
 				const a = buildAnswer(i);
-				const note = a.notes ? theme.fg("dim", " ✎") : "";
+				const clip = a.attachments?.length ? theme.fg("dim", ` 📎${a.attachments.length}`) : "";
+				const note = (a.notes ? theme.fg("dim", " ✎") : "") + clip;
 				if (isAnswered(i)) {
 					addWrapped(theme.fg("muted", `${a.header}: `) + theme.fg("text", a.labels.join(", ")) + note);
 				} else if (a.notesOnly || a.notes) {
@@ -1006,7 +1126,7 @@ export function createDialog(deps: DialogDeps) {
 		function hintLines(width: number): string[] {
 			let parts: string[];
 			if (editing === "freetext" || editing === "notes") {
-				parts = ["Enter save", "Shift+Enter line", "Ctrl+G editor", "Esc back"];
+				parts = ["Enter save", "Shift+Enter line", "Ctrl+V image", "Ctrl+G editor", "Esc back"];
 				if (editing === "freetext") parts.push("↑↓ move away");
 			} else if (currentTab === questions.length) {
 				parts = ["Tab/←→ questions", "Enter submit", "Esc cancel"];

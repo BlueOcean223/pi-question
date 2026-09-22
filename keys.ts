@@ -34,6 +34,8 @@ export interface Keymap {
 	newline(data: string): boolean;
 	cancel(data: string): boolean;
 	externalEditor(data: string): boolean;
+	/** Attach a clipboard image, falling back to pasting clipboard text. */
+	pasteImage(data: string): boolean;
 	space(data: string): boolean;
 	collapse(data: string): boolean;
 }
@@ -66,6 +68,7 @@ export function createKeymap(kb: KeybindingMatcher | undefined): Keymap {
 		newline: bound("tui.input.newLine", "shift+enter"),
 		cancel: bound("tui.select.cancel", "escape"),
 		externalEditor: bound("app.editor.external", "ctrl+g"),
+		pasteImage: bound("app.clipboard.pasteImage", "ctrl+v"),
 		space: (d) => matchesKey(d, Key.space),
 		collapse: (d) => matchesKey(d, COLLAPSE_KEY),
 	};

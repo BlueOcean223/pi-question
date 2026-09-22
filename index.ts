@@ -10,6 +10,8 @@
  * - Number keys 1-9 select directly (full-width digits normalized)
  * - "Type about this" is an inline field: focus it and just start typing.
  *   Multi-line, paste-aware, Ctrl+G opens the configured external editor
+ * - Ctrl+V attaches a clipboard image, and any image path in an answer comes
+ *   back to the model as an image block beside the text
  * - Skip: leave a question unanswered and continue (partial submit allowed)
  * - multiSelect: Space/Enter toggle, explicit Next/Submit button confirms
  * - "Chat about this": ends the dialog asking the model to clarify instead;
@@ -24,11 +26,12 @@
  *   whole body bounded by the terminal so it never scrolls off the top
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { createDialog } from "./dialog.js";
-import { CANCEL_TEXT, formatChatAboutThis, formatSubmitted, NOTES_ONLY } from "./format.js";
+import { CANCEL_TEXT, formatAttachments, formatChatAboutThis, formatSubmitted, NOTES_ONLY } from "./format.js";
+import { attachmentLabel, collectImages } from "./images.js";
 import { PROMPT_GUIDELINES, PROMPT_SNIPPET, TOOL_DESCRIPTION } from "./prompt.js";
 import { registerReconciler, TOOL_NAME } from "./reconcile.js";
 import { AskParams, type AskResult, type Question } from "./types.js";
@@ -39,6 +42,39 @@ function errorResult(message: string, questions: Question[] = []) {
 		content: [{ type: "text" as const, text: message }],
 		details: { questions, answers: [], outcome: "cancelled" } as AskResult,
 	};
+}
+
+/**
+ * Text and image blocks for a dialog that ran.
+ *
+ * The images are read here rather than in the dialog so the person is never
+ * kept waiting on a disk read and a rescale, and so the bytes stay out of
+ * `details`, which is written to the session file verbatim.
+ */
+async function resultContent(body: string, result: AskResult, model: ExtensionContext["model"]) {
+	const sources = result.answers
+		.filter((a) => a.attachments && a.attachments.length > 0)
+		.map((a) => ({ question: a.question, paths: a.attachments ?? [] }));
+	if (sources.length === 0) return [{ type: "text" as const, text: body }];
+
+	let collected: Awaited<ReturnType<typeof collectImages>>;
+	try {
+		collected = await collectImages(sources, {
+			// A model with no image input would be sent a block it cannot read; the
+			// user is told about the attachment in words instead.
+			vision: model?.input.includes("image") ?? false,
+			resizeOptions: model?.inputLimits?.images?.resize,
+			maxImages: model?.inputLimits?.images?.maxPerMessage,
+		});
+	} catch (error) {
+		// The answers are the thing that cost the user an interruption. Whatever
+		// went wrong with the files, the words still go back.
+		const reason = error instanceof Error ? error.message : String(error);
+		return [{ type: "text" as const, text: `${body}\n\nThe images the user attached could not be read (${reason}).` }];
+	}
+	const tail = formatAttachments(collected.attached, collected.notes, result.questions.length > 1);
+	const text = tail ? `${body}\n\n${tail}` : body;
+	return [{ type: "text" as const, text }, ...collected.blocks];
 }
 
 export default function askUserQuestion(pi: ExtensionAPI) {
@@ -84,6 +120,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 						createDialog({
 							questions,
 							signal,
+							cwd: ctx.cwd,
 							externalEditorCommand: () =>
 								SettingsManager.create(ctx.cwd, undefined, {
 									projectTrusted: ctx.isProjectTrusted(),
@@ -105,13 +142,13 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 
 			if (result.outcome === "chat") {
 				return {
-					content: [{ type: "text", text: formatChatAboutThis(result.questions, result.answers) }],
+					content: await resultContent(formatChatAboutThis(result.questions, result.answers), result, ctx.model),
 					details: result,
 				};
 			}
 
 			return {
-				content: [{ type: "text", text: formatSubmitted(result) }],
+				content: await resultContent(formatSubmitted(result), result, ctx.model),
 				details: result,
 			};
 		},
@@ -156,6 +193,11 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 					lines.push(line);
 				} else {
 					lines.push(`${theme.fg("dim", "– ")}${theme.fg("accent", a.header)}: ${theme.fg("dim", "(skipped)")}`);
+				}
+				// Names only: the thumbnails themselves are drawn by Pi, from the
+				// image blocks in the result content.
+				for (const path of a.attachments ?? []) {
+					lines.push(theme.fg("dim", `  📎 ${attachmentLabel(path)}`));
 				}
 			}
 			if (details.outcome === "chat") {

@@ -56,6 +56,12 @@ describe("createKeymap", () => {
 		expect(keys.prevTab("\x1b[Z")).toBe(true);
 	});
 
+	test("the paste key follows Pi's own image-paste binding", () => {
+		const keys = createKeymap(manager({ "app.clipboard.pasteImage": ["\x16"] }));
+		expect(keys.pasteImage("\x16")).toBe(true);
+		expect(keys.pasteImage("\x07")).toBe(false);
+	});
+
 	test("collapse is the fixed shortcut, regardless of the manager", () => {
 		const keys = createKeymap(manager({}));
 		expect(keys.collapse("\x1d")).toBe(true);

@@ -39,6 +39,12 @@ export interface Answer {
 	preview?: string;
 	/** Notes present, no option or typed answer picked. Not a vote. */
 	notesOnly?: boolean;
+	/**
+	 * Absolute paths of image files named in this answer's text. Paths only:
+	 * the bytes ride in the tool result's content blocks, while `details` is
+	 * written to the session file verbatim and base64 there would bloat it.
+	 */
+	attachments?: string[];
 }
 
 export type Outcome = "answered" | "cancelled" | "chat" | "afk";

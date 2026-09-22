@@ -31,8 +31,10 @@
   },
   "files": [
     "index.ts",
+    "clipboard.ts",
     "dialog.ts",
     "format.ts",
+    "images.ts",
     "keys.ts",
     "layout.ts",
     "prompt.ts",

@@ -17,6 +17,7 @@ A [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) extension 
 - **Single question**: numbered option list — press `1`-`9` to pick instantly, or `↑↓` + Enter; single-select submits as soon as you pick
 - **Multiple questions (up to 4)**: tab bar with short header chips (`■` answered / `–` skipped / `✎` notes / `□` unanswered), `Tab`/`←→` to switch, auto-jumps to the next unanswered question, final **Submit** review page — unanswered questions can be skipped; Enter on Submit sends whatever is selected
 - **"Type about this" built in**: every question without option previews gets an inline free-text row — focus it and just start typing. Multi-line (`Shift+Enter`), paste-aware, and `Ctrl+G` hands the draft to your configured external editor. Text persists per question with its undo history; if you end up picking a regular option instead, your text is attached as a note rather than discarded
+- **Attach a screenshot**: `Ctrl+V` in any text field pastes the image on your clipboard — it lands in a temp file and its path goes into the field, exactly as pi's own prompt does it, so a file you drag onto the terminal counts the same way. A dim `📎 shot.png` confirms it; deleting the path un-attaches it. On submit the images ride back as image blocks, and the text names them in order and says which question each answers. Sized to the model's own image limits, skipped with an explanation when the model has no vision
 - **multiSelect**: `Space`/`Enter` toggle `[x]`/`[ ]`, an explicit **Next/Submit** button confirms the question — no ambiguous Enter. Skip is the other half of that pair: it settles the question *without* a selection
 - **Option previews**: single-select options can carry a multi-line markdown `preview` (code snippet, mockup, config example) rendered side-by-side with the option list (stacked on narrow terminals); digits move focus for comparing, `Enter` decides, `n` adds a note. the focused option's description and the Notes line sit in the preview column, under the box. Preview questions carry no free-text row — typing a fifth answer has nothing to compare against, so `n` notes are the escape hatch there
 - **Skip / partial submit**: every question has a Skip row; you can leave some questions unanswered and still submit. Notes-only (typed a note, picked nothing) is sent as `(notes only)` so the model doesn't treat it as a vote
@@ -75,6 +76,7 @@ Confirm, cancel, and up/down follow your pi keybindings; the table shows the def
 | `Space` | Toggle option (multiSelect); on the "Type about this" row, toggle your typed answer in/out |
 | Any character | On the "Type about this" row: start typing your answer right away |
 | `Shift+Enter` | Add a line to the text you are typing |
+| `Ctrl+V` | Attach the image on your clipboard (pastes clipboard text when there is no image). Opens the text field if it is not open yet |
 | `Ctrl+G` | Edit the current draft in your configured external editor |
 | `n` | Add a note (preview questions) |
 | `Ctrl+]` | Collapse the dialog to one line to read the transcript; press again to bring it back |

@@ -11,6 +11,7 @@ import {
 	CANCEL_TEXT,
 	formatAfkTimeout,
 	formatAnswerEntry,
+	formatAttachments,
 	formatChatAboutThis,
 	formatSubmitted,
 	NOTES_ONLY,
@@ -64,8 +65,54 @@ describe("formatAnswerEntry", () => {
 		);
 	});
 
+	test("an attachment is named by file, next to the answer it came with", () => {
+		expect(formatAnswerEntry(answer("Which?", { labels: ["A"], attachments: ["/tmp/shot.png"] }))).toBe(
+			'"Which?"="A" attached: shot.png',
+		);
+	});
+
+	test("an attachment on a notes-only answer is reported too", () => {
+		expect(formatAnswerEntry(answer("Which?", { notesOnly: true, notes: "like this", attachments: ["/tmp/a.png"] }))).toBe(
+			`"Which?"="${NOTES_ONLY}" user notes: like this attached: a.png`,
+		);
+	});
+
 	test("an untouched question contributes nothing", () => {
 		expect(formatAnswerEntry(answer("Which?"))).toBeNull();
+	});
+});
+
+describe("formatAttachments", () => {
+	const attachment = (name: string, q = "Which?") => ({ question: q, path: `/tmp/${name}`, name });
+
+	test("numbers the images so the model can match a block to a question", () => {
+		expect(formatAttachments([attachment("a.png"), attachment("b.png", "Where?")], [], true)).toBe(
+			'The user attached 2 images, included after this text in that order: 1. a.png (for "Which?"), ' +
+				'2. b.png (for "Where?"). This is what the user is pointing at — look at it before you answer.',
+		);
+	});
+
+	test("a single-question dialog does not repeat the question it obviously belongs to", () => {
+		expect(formatAttachments([attachment("a.png")], [], false)).toBe(
+			"The user attached an image, included after this text in that order: 1. a.png. " +
+				"This is what the user is pointing at — look at it before you answer.",
+		);
+	});
+
+	test("notes about dropped or rescaled images follow the list", () => {
+		expect(formatAttachments([attachment("a.png")], ["[b.png was not sent: the file is empty.]"], false)).toContain(
+			"\n[b.png was not sent: the file is empty.]",
+		);
+	});
+
+	test("notes alone are still reported — nothing sent is the case the model must be told about", () => {
+		expect(formatAttachments([], ["the current model cannot read images"], false)).toBe(
+			"the current model cannot read images",
+		);
+	});
+
+	test("nothing attached and nothing to report is empty, not a stray line", () => {
+		expect(formatAttachments([], [], false)).toBe("");
 	});
 });
 

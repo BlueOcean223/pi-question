@@ -46,6 +46,9 @@ WRITING THE QUESTIONS
 PREVIEWS
 An option may carry 'preview': multi-line markdown (code snippet, ASCII mockup, config example, diagram) rendered in a box beside the option list while that option is focused. Use it when the user is choosing between concrete artifacts they need to compare, not for preference questions where labels and descriptions already say everything. Single-select only. A question with previews drops the free-text row — a typed fifth answer has nothing to compare against — and offers a notes field instead.
 
+ATTACHED IMAGES
+The user can attach screenshots while answering. They come back as image blocks after the text, and the text names them in the order they appear and says which question each belongs to. An attached image is evidence the user chose to show you — read it before you act on the words, and treat what it shows as the current state of things, not as something you produced.
+
 READING THE RESULT
 Answers come back keyed by the full question text, with the selected option's preview and any notes echoed alongside. The reply also tells you how the dialog ended, and these are not equivalent:
 - Fully answered: proceed on those answers.

@@ -6,6 +6,8 @@
  * change to the tool's contract with the model.
  */
 
+import { basename } from "node:path";
+import type { Attachment } from "./images.js";
 import type { Answer, AskResult, Question } from "./types.js";
 
 /** Idle window before the dialog submits whatever is selected. */
@@ -23,10 +25,17 @@ export function hasRealChoice(answer: Answer): boolean {
 	return answer.labels.length > 0 && !answer.notesOnly;
 }
 
+/** `attached: a.png, b.png`, or nothing when the answer carries no image. */
+function attachmentSuffix(answer: Answer): string[] {
+	if (!answer.attachments || answer.attachments.length === 0) return [];
+	return [`attached: ${answer.attachments.map((path) => basename(path)).join(", ")}`];
+}
+
 export function formatAnswerEntry(answer: Answer): string | null {
 	if (answer.notesOnly) {
 		const parts = [`"${answer.question}"="${NOTES_ONLY}"`];
 		if (answer.notes) parts.push(`user notes: ${answer.notes}`);
+		parts.push(...attachmentSuffix(answer));
 		return parts.join(" ");
 	}
 	if (answer.labels.length === 0 && !answer.notes) return null;
@@ -47,7 +56,31 @@ export function formatAnswerEntry(answer: Answer): string | null {
 	}
 	if (answer.preview) parts.push(`selected preview:\n${answer.preview}`);
 	if (answer.notes) parts.push(`user notes: ${answer.notes}`);
+	parts.push(...attachmentSuffix(answer));
 	return parts.join(" ");
+}
+
+/**
+ * Where the image blocks that follow this text came from.
+ *
+ * Image blocks arrive anonymous and in one flat list, so this is the only thing
+ * tying image number 2 to the question it answers. The blocks are appended in
+ * exactly this order.
+ */
+export function formatAttachments(attached: Attachment[], notes: string[], labelQuestions: boolean): string {
+	const lines: string[] = [];
+	if (attached.length > 0) {
+		const list = attached
+			.map((a, i) => `${i + 1}. ${a.name}${labelQuestions ? ` (for "${a.question}")` : ""}`)
+			.join(", ");
+		lines.push(
+			`The user attached ${attached.length === 1 ? "an image" : `${attached.length} images`}, ` +
+				`included after this text in that order: ${list}. ` +
+				`This is what the user is pointing at — look at it before you answer.`,
+		);
+	}
+	lines.push(...notes);
+	return lines.join("\n");
 }
 
 export function allFullyAnswered(questions: Question[], answers: Answer[]): boolean {
