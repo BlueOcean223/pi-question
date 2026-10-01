@@ -85,6 +85,13 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 		promptSnippet: PROMPT_SNIPPET,
 		promptGuidelines: PROMPT_GUIDELINES,
 		parameters: AskParams,
+		// Declared to the model, never callable from codemode scripts: a script
+		// would get the answer as bare text, without the attached images, and
+		// `codemode.mode: "only"` would otherwise hide the tool from the model.
+		exposure: "model-only",
+		// Asking changes nothing, so permission extensions that gate on these
+		// hints do not ask the user to approve being asked.
+		annotations: { readOnlyHint: true, openWorldHint: false },
 		executionMode: "sequential",
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
