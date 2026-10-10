@@ -98,7 +98,7 @@ Values need a unit: `90s`, `5m`, `1h`. `never`, `off`, or `0` keep it off; anyth
 ## Development
 
 ```bash
-bun run test        # pins the strings the model reads back, plus rows/layout/keys
+bun run test        # pins the strings the model reads back, plus rows/layout/keys and the dialog driven by keystrokes
 bun run typecheck
 ```
 

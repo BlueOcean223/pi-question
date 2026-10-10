@@ -212,6 +212,22 @@ describe("formatChatAboutThis", () => {
 				"  (No answer provided)",
 		);
 	});
+
+	test("a typed answer is marked as typed here too", () => {
+		const text = formatChatAboutThis(
+			[question("Which?"), question("And?", "A")],
+			[
+				answer("Which?", { labels: ["check the schema first"], customLabels: ["check the schema first"] }),
+				answer("And?", { labels: ["A", "and Redis"], customLabels: ["and Redis"] }),
+			],
+		);
+		expect(text.split("Questions asked:\n")[1]).toBe(
+			'- "Which?"\n' +
+				"  Answer: check the schema first (typed by the user, not one of your options)\n" +
+				'- "And?"\n' +
+				"  Answer: A, and Redis (typed by the user, not one of your options: and Redis)",
+		);
+	});
 });
 
 describe("CANCEL_TEXT", () => {

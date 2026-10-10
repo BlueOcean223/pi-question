@@ -98,7 +98,7 @@ PI_QUESTION_AFK_TIMEOUT=5m pi
 ## 开发
 
 ```bash
-bun run test        # 钉住模型可见文案，外加行模型 / 布局 / 键位
+bun run test        # 钉住模型可见文案，外加行模型 / 布局 / 键位，以及用按键驱动的对话框
 bun run typecheck
 ```
 

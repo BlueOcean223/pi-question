@@ -27,6 +27,20 @@ function attachmentSuffix(answer: Answer): string[] {
 	return [`attached: ${answer.attachments.map((path) => basename(path)).join(", ")}`];
 }
 
+/**
+ * Which labels the user typed rather than picked, or undefined when every
+ * label is one of the model's options. A typed answer reads exactly like a
+ * label the model wrote, so this is the only thing telling them apart. The two
+ * are not interchangeable: typed text is often an instruction, not a pick from
+ * the list.
+ */
+function typedMarker(answer: Answer): string | undefined {
+	if (answer.customLabels.length === 0) return undefined;
+	return answer.customLabels.length === answer.labels.length
+		? "(typed by the user, not one of your options)"
+		: `(typed by the user, not one of your options: ${answer.customLabels.join(", ")})`;
+}
+
 export function formatAnswerEntry(answer: Answer): string | null {
 	if (answer.notesOnly) {
 		const parts = [`"${answer.question}"="${NOTES_ONLY}"`];
@@ -40,16 +54,8 @@ export function formatAnswerEntry(answer: Answer): string | null {
 			? `"${answer.question}"="${answer.labels.join(", ")}"`
 			: `"${answer.question}"=(no option selected)`,
 	];
-	// A typed answer reads exactly like a label the model wrote, so say which it
-	// was. The two are not interchangeable: typed text is often an instruction,
-	// not a pick from the list.
-	if (answer.customLabels.length > 0) {
-		parts.push(
-			answer.customLabels.length === answer.labels.length
-				? "(typed by the user, not one of your options)"
-				: `(typed by the user, not one of your options: ${answer.customLabels.join(", ")})`,
-		);
-	}
+	const typed = typedMarker(answer);
+	if (typed) parts.push(typed);
 	if (answer.preview) parts.push(`selected preview:\n${answer.preview}`);
 	if (answer.notes) parts.push(`user notes: ${answer.notes}`);
 	parts.push(...attachmentSuffix(answer));
@@ -121,7 +127,10 @@ export function formatChatAboutThis(questions: Question[], answers: Answer[]): s
 		if (!a) return `- "${q.question}"\n  (No answer provided)`;
 		const bits = [`- "${q.question}"`];
 		if (a.notesOnly) bits.push(`  Answer: ${NOTES_ONLY}`);
-		else if (a.labels.length > 0) bits.push(`  Answer: ${a.labels.join(", ")}`);
+		else if (a.labels.length > 0) {
+			const typed = typedMarker(a);
+			bits.push(`  Answer: ${a.labels.join(", ")}${typed ? ` ${typed}` : ""}`);
+		}
 		else bits.push("  (No answer provided)");
 		if (a.notes) bits.push(`  Notes: ${a.notes}`);
 		return bits.join("\n");
