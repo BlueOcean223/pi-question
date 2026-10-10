@@ -182,6 +182,14 @@ describe("formatAfkTimeout", () => {
 	test("singular minute", () => {
 		expect(formatAfkTimeout(60_000)).toBe("The dialog auto-continued after 1 minute of idle (user away from keyboard).");
 	});
+
+	test("a timeout under a minute is not rounded to zero minutes", () => {
+		expect(formatAfkTimeout(30_000)).toBe("The dialog auto-continued after 30 seconds of idle (user away from keyboard).");
+	});
+
+	test("a missing duration still names the idle", () => {
+		expect(formatAfkTimeout(undefined)).toBe("The dialog auto-continued after a period of idle (user away from keyboard).");
+	});
 });
 
 describe("formatChatAboutThis", () => {

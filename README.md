@@ -22,7 +22,8 @@ A [Pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) extension 
 - **Option previews**: single-select options can carry a multi-line markdown `preview` (code snippet, mockup, config example) rendered side-by-side with the option list (stacked on narrow terminals); digits move focus for comparing, `Enter` decides, `n` adds a note. the focused option's description and the Notes line sit in the preview column, under the box. Preview questions carry no free-text row — typing a fifth answer has nothing to compare against, so `n` notes are the escape hatch there
 - **Skip / partial submit**: every question has a Skip row; you can leave some questions unanswered and still submit. Notes-only (typed a note, picked nothing) is sent as `(notes only)` so the model doesn't treat it as a vote
 - **"Chat about this"**: every question offers an escape hatch that ends the dialog and asks the model to clarify instead — any answers you already picked are carried along. A rule sets it apart from the option and action rows, so it never reads as one more option
-- **5-minute idle auto-submit**: if you walk away, the dialog submits whatever is selected so far (last 20s show a countdown). Idle is not treated as "continue with your best judgment"
+- **Waits for you**: a question stays open until you answer it, however long you are away. Idle auto-submit is opt-in — see [Idle auto-submit](#idle-auto-submit)
+- **Shows as blocked in [herdr](https://github.com/herdrdev/herdr)**: while a question is open the pane is reported as waiting on you (via the `herdr:blocked` event), not as working. With nothing listening for the event it has no effect
 - **Model-friendly results**: answers are keyed by the full question text (no chip-label decoding), selected previews and notes are echoed back as annotations, and an answer you typed yourself is marked as typed instead of blending in with the options the model wrote — typed text is often an instruction, not a pick. The model sees a different wrap-up depending on the outcome (all answered / typed / partial or notes / idle / empty / cancelled), so a skipped question or a "don't ship this" note is not read as full approval
 - **Input validation**: 1-4 questions with 2-4 options each; duplicate question texts or option labels are rejected with retryable error messages. A question with fewer than 2 options is not a decision — the model is told not to retry and not to invent a filler option, and to take its one path and continue
 - **The model brings an opinion**: the prompt tells it to recommend by default — it has just read the code and knows something you don't — putting its pick first with ` (Recommended)` appended and the reason in the description. It is told to leave the recommendation off rather than manufacture one when the choice is genuinely your taste
@@ -83,6 +84,16 @@ Confirm, cancel, and up/down follow your pi keybindings; the table shows the def
 | Skip row (or its number) | Leave this question unanswered and continue |
 | `Tab` / `←` `→` | Switch questions (multi-question mode) |
 | `Esc` | Cancel dialog (inside the inline input: save text and go back) |
+
+## Idle auto-submit
+
+Off by default. To have an unanswered dialog submit whatever is selected so far after a stretch of no input, set `PI_QUESTION_AFK_TIMEOUT` in the environment pi starts with:
+
+```bash
+PI_QUESTION_AFK_TIMEOUT=5m pi
+```
+
+Values need a unit: `90s`, `5m`, `1h`. `never`, `off`, or `0` keep it off; anything else is ignored with a one-time warning. The last 20 seconds show a countdown, a collapsed dialog does not count down, and the model is told that nobody was at the keyboard — idle is not read as consent.
 
 ## Development
 

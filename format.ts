@@ -7,13 +7,9 @@
  */
 
 import { basename } from "node:path";
+import { formatDuration } from "./afk.js";
 import type { Attachment } from "./images.js";
 import type { Answer, AskResult, Question } from "./types.js";
-
-/** Idle window before the dialog submits whatever is selected. */
-export const AFK_TIMEOUT_MS = 5 * 60 * 1000;
-/** Tail of the idle window during which the hint row shows a countdown. */
-export const AFK_COUNTDOWN_MS = 20 * 1000;
 
 /** Model-facing value when the user wrote notes but picked no option. */
 export const NOTES_ONLY = "(notes only)";
@@ -91,17 +87,16 @@ export function allFullyAnswered(questions: Question[], answers: Answer[]): bool
 	});
 }
 
-export function formatAfkTimeout(timeoutMs: number): string {
-	const minutes = Math.round(timeoutMs / 60_000);
-	const unit = minutes === 1 ? "minute" : "minutes";
-	return `The dialog auto-continued after ${minutes} ${unit} of idle (user away from keyboard).`;
+export function formatAfkTimeout(timeoutMs: number | undefined): string {
+	const after = timeoutMs ? `after ${formatDuration(timeoutMs)} of idle` : "after a period of idle";
+	return `The dialog auto-continued ${after} (user away from keyboard).`;
 }
 
 export function formatSubmitted(result: AskResult): string {
 	const body = result.answers.map(formatAnswerEntry).filter((e): e is string => e !== null).join(", ");
 
 	if (result.outcome === "afk") {
-		const timeout = formatAfkTimeout(result.afkTimeoutMs ?? AFK_TIMEOUT_MS);
+		const timeout = formatAfkTimeout(result.afkTimeoutMs);
 		return body ? `${timeout}\n\nBefore going idle the user had selected: ${body}.` : timeout;
 	}
 

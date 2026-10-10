@@ -25,8 +25,8 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import { AFK_COUNTDOWN_MS } from "./afk.js";
 import { extensionFromMagic, readClipboardImage, readClipboardText } from "./clipboard.js";
-import { AFK_COUNTDOWN_MS, AFK_TIMEOUT_MS } from "./format.js";
 import { attachedPaths, attachmentLabel, resolveImagePath } from "./images.js";
 import { COLLAPSE_KEY, createKeymap, formatKeySpec, type KeybindingMatcher, type Keymap } from "./keys.js";
 import {
@@ -59,6 +59,8 @@ export interface DialogDeps {
 	/** Pi's configured `$EDITOR` command, or undefined when none is set. */
 	externalEditorCommand(): string | undefined;
 	notify(message: string, type?: "info" | "warning" | "error"): void;
+	/** Idle time before the dialog submits what is selected. Absent: wait for the person. */
+	afkTimeoutMs?: number;
 }
 
 export interface DialogComponent {
@@ -89,7 +91,9 @@ function padToWidth(s: string, width: number): string {
 }
 
 export function createDialog(deps: DialogDeps) {
-	const { questions, signal, cwd, externalEditorCommand, notify } = deps;
+	const { questions, signal, cwd, externalEditorCommand, notify, afkTimeoutMs } = deps;
+	// A timeout shorter than the countdown counts down from the start.
+	const countdownMs = afkTimeoutMs === undefined ? 0 : Math.min(AFK_COUNTDOWN_MS, afkTimeoutMs);
 
 	return (tui: TUI, theme: Theme, kb: KeybindingMatcher | undefined, done: (r: AskResult) => void): DialogComponent => {
 		const keys: Keymap = createKeymap(kb);
@@ -326,7 +330,7 @@ export function createDialog(deps: DialogDeps) {
 				questions,
 				answers: questions.map((_, i) => buildAnswer(i)),
 				outcome: "afk",
-				afkTimeoutMs: AFK_TIMEOUT_MS,
+				afkTimeoutMs,
 			});
 		}
 
@@ -1119,8 +1123,10 @@ export function createDialog(deps: DialogDeps) {
 			return out;
 		}
 
-		function remainingAfkMs(): number {
-			return Math.max(0, AFK_TIMEOUT_MS - (Date.now() - lastActivity));
+		/** Undefined when the dialog waits for the person indefinitely. */
+		function remainingAfkMs(): number | undefined {
+			if (afkTimeoutMs === undefined) return undefined;
+			return Math.max(0, afkTimeoutMs - (Date.now() - lastActivity));
 		}
 
 		function hintLines(width: number): string[] {
@@ -1146,10 +1152,11 @@ export function createDialog(deps: DialogDeps) {
 			}
 			parts.push(`${formatKeySpec(COLLAPSE_KEY)} collapse`);
 			const remaining = remainingAfkMs();
-			if (remaining <= AFK_COUNTDOWN_MS) {
+			let color: "warning" | "dim" = "dim";
+			if (remaining !== undefined && remaining <= countdownMs) {
 				parts.push(`auto-submit ${Math.ceil(remaining / 1000)}s`);
+				color = "warning";
 			}
-			const color = remaining <= AFK_COUNTDOWN_MS ? "warning" : "dim";
 			const out: string[] = [];
 			for (const line of wrapTextWithAnsi(theme.fg(color, parts.join(" · ")), Math.max(1, width - 1))) {
 				out.push(" " + line);
@@ -1214,23 +1221,26 @@ export function createDialog(deps: DialogDeps) {
 			return lines;
 		}
 
-		afkTimer = setInterval(() => {
-			if (finished) return;
-			// A collapsed dialog is one the user deliberately put aside to read the
-			// transcript. Auto-submitting something they cannot see is worse than
-			// waiting, so the idle clock pauses rather than runs out behind them.
-			if (collapsed) {
-				bumpActivity();
-				return;
-			}
-			const remaining = remainingAfkMs();
-			if (remaining <= 0) {
-				submitAfk();
-				return;
-			}
-			if (remaining <= AFK_COUNTDOWN_MS) refresh();
-		}, 1000);
-		(afkTimer as { unref?: () => void }).unref?.();
+		// No timeout configured: no timer at all, the dialog waits for the person.
+		if (afkTimeoutMs !== undefined) {
+			afkTimer = setInterval(() => {
+				if (finished) return;
+				// A collapsed dialog is one the user deliberately put aside to read the
+				// transcript. Auto-submitting something they cannot see is worse than
+				// waiting, so the idle clock pauses rather than runs out behind them.
+				if (collapsed) {
+					bumpActivity();
+					return;
+				}
+				const remaining = remainingAfkMs() ?? Infinity;
+				if (remaining <= 0) {
+					submitAfk();
+					return;
+				}
+				if (remaining <= countdownMs) refresh();
+			}, 1000);
+			(afkTimer as { unref?: () => void }).unref?.();
+		}
 
 		return {
 			render,

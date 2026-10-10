@@ -20,7 +20,9 @@
  *   there — `n` notes are the escape hatch while comparing options
  * - Ctrl+] collapses the dialog to one line so the transcript is readable
  * - Answers keyed by full question text; notes/preview echoed as annotations
- * - 5-minute idle auto-submits whatever is selected so far
+ * - Waits for an answer by default; PI_QUESTION_AFK_TIMEOUT opts into an idle
+ *   auto-submit of whatever is selected so far
+ * - Reports itself to herdr as blocked while it waits
  * - Keys resolve through Pi's keybinding manager, so remaps are honored
  * - Stable layout: every tab padded to the tallest question's height, and the
  *   whole body bounded by the terminal so it never scrolls off the top
@@ -29,6 +31,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { AFK_ENV, formatDuration, parseAfkTimeout } from "./afk.js";
 import { createDialog } from "./dialog.js";
 import { CANCEL_TEXT, formatAttachments, formatChatAboutThis, formatSubmitted, NOTES_ONLY } from "./format.js";
 import { attachmentLabel, collectImages } from "./images.js";
@@ -36,6 +39,17 @@ import { PROMPT_GUIDELINES, PROMPT_SNIPPET, TOOL_DESCRIPTION } from "./prompt.js
 import { registerReconciler, TOOL_NAME } from "./reconcile.js";
 import { AskParams, type AskResult, type Question } from "./types.js";
 import { validateQuestions } from "./validate.js";
+
+/**
+ * herdr, a terminal workspace for agents, marks a pane as waiting on its user
+ * from this event; with no listener the emit does nothing. Its Pi integration
+ * does not read Pi's own prompt events, so a dialog that does not announce
+ * itself shows as "working" for as long as nobody answers it.
+ */
+const BLOCKED_EVENT = "herdr:blocked";
+
+/** A bad value is reported once per process, not on every question. */
+let afkConfigWarned = false;
 
 function errorResult(message: string, questions: Question[] = []) {
 	return {
@@ -113,6 +127,12 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				multiSelect: q.multiSelect === true,
 			}));
 
+			const afk = parseAfkTimeout(process.env[AFK_ENV]);
+			if (afk.error && !afkConfigWarned) {
+				afkConfigWarned = true;
+				ctx.ui.notify(afk.error, "warning");
+			}
+
 			// Hide the animated working spinner while the dialog is up. If the
 			// dialog fills the screen the spinner row lands above the viewport,
 			// and every 80ms animation frame then forces a full redraw that
@@ -123,18 +143,27 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				if (signal?.aborted) {
 					result = { questions, answers: [], outcome: "cancelled" };
 				} else {
-					result = await ctx.ui.custom<AskResult>(
-						createDialog({
-							questions,
-							signal,
-							cwd: ctx.cwd,
-							externalEditorCommand: () =>
-								SettingsManager.create(ctx.cwd, undefined, {
-									projectTrusted: ctx.isProjectTrusted(),
-								}).getExternalEditorCommand() || undefined,
-							notify: (message, type) => ctx.ui.notify(message, type),
-						}),
-					);
+					pi.events.emit(BLOCKED_EVENT, {
+						active: true,
+						label: `Question: ${questions.map((q) => q.header).join(", ")}`,
+					});
+					try {
+						result = await ctx.ui.custom<AskResult>(
+							createDialog({
+								questions,
+								signal,
+								cwd: ctx.cwd,
+								externalEditorCommand: () =>
+									SettingsManager.create(ctx.cwd, undefined, {
+										projectTrusted: ctx.isProjectTrusted(),
+									}).getExternalEditorCommand() || undefined,
+								notify: (message, type) => ctx.ui.notify(message, type),
+								afkTimeoutMs: afk.timeoutMs,
+							}),
+						);
+					} finally {
+						pi.events.emit(BLOCKED_EVENT, { active: false });
+					}
 				}
 			} finally {
 				ctx.ui.setWorkingVisible(true);
@@ -185,7 +214,8 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 			}
 			const lines: string[] = [];
 			if (details.outcome === "afk") {
-				lines.push(theme.fg("warning", "Auto-continued after 5 minutes idle"));
+				const duration = details.afkTimeoutMs ? `${formatDuration(details.afkTimeoutMs)} ` : "";
+				lines.push(theme.fg("warning", `Auto-continued after ${duration}idle`));
 			}
 			for (const a of details.answers) {
 				if (a.notesOnly) {
