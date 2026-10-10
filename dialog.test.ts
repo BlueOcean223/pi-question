@@ -14,6 +14,8 @@ const KEY = {
 	enter: "\r",
 	esc: "\x1b",
 	tab: "\t",
+	left: "\x1b[D",
+	right: "\x1b[C",
 	collapse: "\x1d", // Ctrl+]
 };
 
@@ -101,6 +103,17 @@ describe("single question", () => {
 });
 
 describe("several questions", () => {
+	test("on the free-text row the arrows move the cursor; only Tab switches questions", () => {
+		const d = openDialog(TWO);
+		d.press("3"); // the free-text row
+		d.type("ac");
+		d.press(KEY.left);
+		d.type("b");
+		d.press(KEY.right, KEY.right); // switched tabs twice before
+		d.press(KEY.tab, "1", KEY.enter);
+		expect(d.result?.answers.map((a) => a.labels)).toEqual([["abc"], ["A"]]);
+	});
+
 	test("a pick moves on instead of submitting, and Submit sends a partial set", () => {
 		const d = openDialog(TWO);
 		d.press("1");

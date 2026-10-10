@@ -29,6 +29,12 @@ export interface Keymap {
 	lastRow(data: string): boolean;
 	nextTab(data: string): boolean;
 	prevTab(data: string): boolean;
+	/**
+	 * Tab / Shift+Tab only. While a field is being edited the arrows move the
+	 * cursor, as they do in Claude Code's question dialog, so only Tab switches.
+	 */
+	nextTabFromField(data: string): boolean;
+	prevTabFromField(data: string): boolean;
 	/** Only meaningful outside the inline editor; test `newline` first inside it. */
 	confirm(data: string): boolean;
 	newline(data: string): boolean;
@@ -64,6 +70,8 @@ export function createKeymap(kb: KeybindingMatcher | undefined): Keymap {
 		// id in the select context — `tui.input.tab` is autocompletion, not this.
 		nextTab: (d) => matchesKey(d, Key.tab) || matchesKey(d, Key.right),
 		prevTab: (d) => matchesKey(d, Key.shift("tab")) || matchesKey(d, Key.left),
+		nextTabFromField: (d) => matchesKey(d, Key.tab),
+		prevTabFromField: (d) => matchesKey(d, Key.shift("tab")),
 		confirm: (d) => selectConfirm(d) || inputSubmit(d),
 		newline: bound("tui.input.newLine", "shift+enter"),
 		cancel: bound("tui.select.cancel", "escape"),

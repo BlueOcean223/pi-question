@@ -82,7 +82,7 @@ Confirm, cancel, and up/down follow your pi keybindings; the table shows the def
 | `n` | Add a note (preview questions) |
 | `Ctrl+]` | Collapse the dialog to one line to read the transcript; press again to bring it back |
 | Skip row (or its number) | Leave this question unanswered and continue |
-| `Tab` / `←` `→` | Switch questions (multi-question mode) |
+| `Tab` / `←` `→` | Switch questions (multi-question mode). While you are typing in a field, `←` `→` move the cursor and only `Tab` / `Shift+Tab` switch |
 | `Esc` | Cancel dialog (inside the inline input: save text and go back) |
 
 ## Idle auto-submit

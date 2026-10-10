@@ -617,8 +617,10 @@ export function createDialog(deps: DialogDeps) {
 				saveEdit();
 				return;
 			}
-			if (isMulti && editing === "freetext" && (keys.nextTab(data) || keys.prevTab(data))) {
-				const delta = keys.nextTab(data) ? 1 : -1;
+			// Only Tab switches questions from inside a field; the arrows move the
+			// cursor, as they do in Claude Code's question dialog.
+			if (isMulti && (keys.nextTabFromField(data) || keys.prevTabFromField(data))) {
+				const delta = keys.nextTabFromField(data) ? 1 : -1;
 				saveEdit();
 				switchTab(delta);
 				return;
@@ -1134,6 +1136,7 @@ export function createDialog(deps: DialogDeps) {
 			if (editing === "freetext" || editing === "notes") {
 				parts = ["Enter save", "Shift+Enter line", "Ctrl+V image", "Ctrl+G editor", "Esc back"];
 				if (editing === "freetext") parts.push("↑↓ move away");
+				if (isMulti) parts.push("Tab questions");
 			} else if (currentTab === questions.length) {
 				parts = ["Tab/←→ questions", "Enter submit", "Esc cancel"];
 			} else {

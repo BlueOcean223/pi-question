@@ -75,3 +75,15 @@ describe("formatKeySpec", () => {
 		expect(formatKeySpec("alt+o")).toBe("Alt+O");
 	});
 });
+
+describe("switching questions from inside a field", () => {
+	test("only Tab and Shift+Tab: the arrows belong to the cursor", () => {
+		const keys = createKeymap(undefined);
+		expect(keys.nextTabFromField("\t")).toBe(true);
+		expect(keys.prevTabFromField("\x1b[Z")).toBe(true);
+		expect(keys.nextTabFromField("\x1b[C")).toBe(false);
+		expect(keys.prevTabFromField("\x1b[D")).toBe(false);
+		// Outside a field the arrows still switch.
+		expect(keys.nextTab("\x1b[C")).toBe(true);
+	});
+});
