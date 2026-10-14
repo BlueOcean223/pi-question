@@ -16,7 +16,7 @@
  * twice, because either half may be acted on alone.
  */
 
-import { MAX_OPTIONS, MAX_QUESTIONS, MIN_OPTIONS } from "./types.js";
+import { MAX_OPTIONS, MAX_QUESTIONS, MIN_OPTIONS } from "./types.ts";
 
 export const PROMPT_SNIPPET = "Ask the user to choose between written-out options when a decision is theirs, not yours";
 

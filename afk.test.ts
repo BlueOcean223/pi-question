@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AFK_ENV, formatDuration, parseAfkTimeout } from "./afk.js";
+import { AFK_ENV, formatDuration, parseAfkTimeout } from "./afk.ts";
 
 describe("parseAfkTimeout", () => {
 	test("unset waits for the person", () => {

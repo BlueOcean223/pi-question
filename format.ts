@@ -7,9 +7,9 @@
  */
 
 import { basename } from "node:path";
-import { formatDuration } from "./afk.js";
-import type { Attachment } from "./images.js";
-import type { Answer, AskResult, Question } from "./types.js";
+import { formatDuration } from "./afk.ts";
+import type { Attachment } from "./images.ts";
+import type { Answer, AskResult, Question } from "./types.ts";
 
 /** Model-facing value when the user wrote notes but picked no option. */
 export const NOTES_ONLY = "(notes only)";

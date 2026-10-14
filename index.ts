@@ -31,14 +31,14 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { AFK_ENV, formatDuration, parseAfkTimeout } from "./afk.js";
-import { createDialog } from "./dialog.js";
-import { CANCEL_TEXT, formatAttachments, formatChatAboutThis, formatSubmitted, NOTES_ONLY } from "./format.js";
-import { attachmentLabel, collectImages } from "./images.js";
-import { PROMPT_GUIDELINES, PROMPT_SNIPPET, TOOL_DESCRIPTION } from "./prompt.js";
-import { registerReconciler, TOOL_NAME } from "./reconcile.js";
-import { AskParams, type AskResult, type Question } from "./types.js";
-import { validateQuestions } from "./validate.js";
+import { AFK_ENV, formatDuration, parseAfkTimeout } from "./afk.ts";
+import { createDialog } from "./dialog.ts";
+import { CANCEL_TEXT, formatAttachments, formatChatAboutThis, formatSubmitted, NOTES_ONLY } from "./format.ts";
+import { attachmentLabel, collectImages } from "./images.ts";
+import { PROMPT_GUIDELINES, PROMPT_SNIPPET, TOOL_DESCRIPTION } from "./prompt.ts";
+import { registerReconciler, TOOL_NAME } from "./reconcile.ts";
+import { AskParams, type AskResult, type Question } from "./types.ts";
+import { validateQuestions } from "./validate.ts";
 
 /**
  * herdr, a terminal workspace for agents, marks a pane as waiting on its user

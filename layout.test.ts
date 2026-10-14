@@ -9,7 +9,7 @@ import {
 	MIN_PREVIEW_WIDTH,
 	PREVIEW_COLUMN_GAP,
 	RESERVED_HOST_ROWS,
-} from "./layout.js";
+} from "./layout.ts";
 
 describe("adaptiveLeftWidth", () => {
 	test("short labels collapse to the floor instead of hogging the pane", () => {
@@ -44,7 +44,7 @@ describe("adaptiveLeftWidth", () => {
 describe("globalLeftWidth", () => {
 	test("takes the widest tab so the split does not shift on tab switch", () => {
 		const tabs = [["Yes", "No"], ["Server-side rendering", "Static"]];
-		expect(globalLeftWidth(tabs, 120)).toBe(adaptiveLeftWidth(tabs[1], 2, 120));
+		expect(globalLeftWidth(tabs, 120)).toBe(adaptiveLeftWidth(tabs[1]!, 2, 120));
 	});
 
 	test("no preview tabs at all still yields a sane floor", () => {

@@ -7,8 +7,8 @@
 import { afterEach, describe, expect, jest, test } from "bun:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import { createDialog, type DialogComponent, type DialogDeps } from "./dialog.js";
-import type { AskResult, Question } from "./types.js";
+import { createDialog, type DialogComponent, type DialogDeps } from "./dialog.ts";
+import type { AskResult, Question } from "./types.ts";
 
 const KEY = {
 	enter: "\r",

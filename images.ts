@@ -102,9 +102,9 @@ function splitTokens(text: string): string[] {
 	const tokens: string[] = [];
 	let current = "";
 	for (let i = 0; i < text.length; i++) {
-		const ch = text[i];
-		if (ch === "\\" && i + 1 < text.length && /\s/.test(text[i + 1])) {
-			current += text[i + 1];
+		const ch = text.charAt(i);
+		if (ch === "\\" && i + 1 < text.length && /\s/.test(text.charAt(i + 1))) {
+			current += text.charAt(i + 1);
 			i++;
 			continue;
 		}
@@ -339,7 +339,7 @@ export async function collectImages(
 			continue;
 		}
 		blocks.push({ type: "image", data: result.data, mimeType: result.mimeType });
-		attached.push(sent[i]);
+		attached.push(sent[i]!);
 		notes.push(...result.hints);
 	}
 	return { blocks, attached, notes };

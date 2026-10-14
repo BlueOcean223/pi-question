@@ -68,8 +68,8 @@ while (queue.length > 0) {
 		failures.push(`${file} is imported but missing from files[] in package.json`);
 		continue;
 	}
-	for (const [, target] of readFileSync(file, "utf8").matchAll(/from "\.\/([\w.-]+)\.js"/g)) {
-		queue.push(`${target}.ts`);
+	for (const [, target] of readFileSync(file, "utf8").matchAll(/from "\.\/([\w.-]+\.ts)"/g)) {
+		queue.push(target);
 	}
 }
 

@@ -7,7 +7,7 @@
  * count that has to be steered rather than bounced (see `tooFewOptionsSteer`).
  */
 
-import { MAX_OPTIONS, MAX_QUESTIONS, MIN_OPTIONS, type RawQuestion } from "./types.js";
+import { MAX_OPTIONS, MAX_QUESTIONS, MIN_OPTIONS, type RawQuestion } from "./types.ts";
 
 /**
  * A one-option question is not a decision. A generic "add more options" error

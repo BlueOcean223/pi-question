@@ -59,7 +59,7 @@ export function cursorOffset(editor: Editor): number {
 	const { line, col } = editor.getCursor();
 	const lines = editor.getLines();
 	let offset = 0;
-	for (let i = 0; i < line && i < lines.length; i++) offset += lines[i].length + 1;
+	for (let i = 0; i < line && i < lines.length; i++) offset += lines[i]!.length + 1;
 	return offset + col;
 }
 

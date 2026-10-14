@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { hasPreviewLayout, rowDigit, rowsFor, sentinelsFor } from "./rows.js";
-import type { Question } from "./types.js";
+import { hasPreviewLayout, rowDigit, rowsFor, sentinelsFor } from "./rows.ts";
+import type { Question } from "./types.ts";
 
 function q(over: Partial<Question> = {}): Question {
 	return {

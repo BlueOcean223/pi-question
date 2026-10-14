@@ -25,18 +25,18 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { AFK_COUNTDOWN_MS } from "./afk.js";
-import { extensionFromMagic, readClipboardImage, readClipboardText } from "./clipboard.js";
-import { attachedPaths, attachmentLabel, resolveImagePath } from "./images.js";
-import { COLLAPSE_KEY, createKeymap, formatKeySpec, type KeybindingMatcher, type Keymap } from "./keys.js";
+import { AFK_COUNTDOWN_MS } from "./afk.ts";
+import { extensionFromMagic, readClipboardImage, readClipboardText } from "./clipboard.ts";
+import { attachedPaths, attachmentLabel, resolveImagePath } from "./images.ts";
+import { COLLAPSE_KEY, createKeymap, formatKeySpec, type KeybindingMatcher, type Keymap } from "./keys.ts";
 import {
 	bodyHeightCap,
 	focusWindow,
 	globalLeftWidth,
 	PREVIEW_COLUMN_GAP,
 	SIDE_BY_SIDE_MIN_WIDTH,
-} from "./layout.js";
-import { hasPreviewLayout, ROW_INTENT, rowDigit, rowsFor, type SentinelKind } from "./rows.js";
+} from "./layout.ts";
+import { hasPreviewLayout, ROW_INTENT, rowDigit, rowsFor, type SentinelKind } from "./rows.ts";
 import {
 	createHeadlessEditor,
 	cursorOffset,
@@ -44,8 +44,8 @@ import {
 	editExternally,
 	renderInlineBuffer,
 	storedText,
-} from "./text-input.js";
-import type { Answer, AskResult, Question } from "./types.js";
+} from "./text-input.ts";
+import type { Answer, AskResult, Question } from "./types.ts";
 
 const PREVIEW_MAX_LINES = 12;
 
@@ -215,7 +215,12 @@ export function createDialog(deps: DialogDeps) {
 		// ---- Question/row model ----
 
 		function q(i: number = currentTab): Question {
-			return questions[Math.min(i, questions.length - 1)];
+			return questions[Math.min(i, questions.length - 1)]!;
+		}
+
+		/** Option indexes picked on question `qi`. */
+		function pickedOf(qi: number): Set<number> {
+			return picked[qi]!;
 		}
 
 		function cursor(): number {
@@ -227,11 +232,11 @@ export function createDialog(deps: DialogDeps) {
 			const clamped = Math.max(0, Math.min(v, rows.length - 1));
 			cursorByQ[currentTab] = clamped;
 			const row = rows[clamped];
-			if (row.kind === "option") lastOptionByQ[currentTab] = row.optionIndex;
+			if (row?.kind === "option") lastOptionByQ[currentTab] = row.optionIndex;
 		}
 
 		function isAnswered(qi: number): boolean {
-			return picked[qi].size > 0 || (freeformSelected[qi] && freeformText(qi).trim().length > 0);
+			return pickedOf(qi).size > 0 || (freeformSelected[qi] === true && freeformText(qi).trim().length > 0);
 		}
 
 		function hasNotes(qi: number): boolean {
@@ -239,7 +244,7 @@ export function createDialog(deps: DialogDeps) {
 		}
 
 		function isSettled(qi: number): boolean {
-			return isAnswered(qi) || skipped[qi];
+			return isAnswered(qi) || skipped[qi] === true;
 		}
 
 		function allSettled(): boolean {
@@ -247,8 +252,8 @@ export function createDialog(deps: DialogDeps) {
 		}
 
 		function buildAnswer(qi: number): Answer {
-			const question = questions[qi];
-			const labels = [...picked[qi]].sort((a, b) => a - b).map((idx) => question.options[idx].label);
+			const question = q(qi);
+			const labels = [...pickedOf(qi)].sort((a, b) => a - b).map((idx) => question.options[idx]!.label);
 			const text = freeformText(qi).trim();
 			const custom = freeformSelected[qi] && text ? [text] : [];
 			// Typed text the user didn't end up voting with rides along as a note
@@ -258,8 +263,9 @@ export function createDialog(deps: DialogDeps) {
 			const noteFromN = notesText(qi).trim() || undefined;
 			const notes = noteFromN ?? strayTyped;
 			let preview: string | undefined;
-			if (!question.multiSelect && picked[qi].size === 1) {
-				preview = question.options[[...picked[qi]][0]].preview;
+			if (!question.multiSelect && pickedOf(qi).size === 1) {
+				const [only] = pickedOf(qi);
+				preview = question.options[only!]?.preview;
 			}
 			const chosen = [...labels, ...custom];
 			const notesOnly = chosen.length === 0 && !!notes;
@@ -281,7 +287,7 @@ export function createDialog(deps: DialogDeps) {
 		function syncFreeformSelection() {
 			const i = currentTab;
 			const text = freeformText(i).trim();
-			if (text && picked[i].size === 0) freeformSelected[i] = true;
+			if (text && pickedOf(i).size === 0) freeformSelected[i] = true;
 			else if (!text) freeformSelected[i] = false;
 		}
 
@@ -336,7 +342,7 @@ export function createDialog(deps: DialogDeps) {
 
 		function skipQuestion() {
 			const i = currentTab;
-			picked[i].clear();
+			pickedOf(i).clear();
 			freeformSelected[i] = false;
 			skipped[i] = true;
 			if (!isMulti) {
@@ -367,8 +373,8 @@ export function createDialog(deps: DialogDeps) {
 
 		function commitOption(oi: number) {
 			const i = currentTab;
-			picked[i].clear();
-			picked[i].add(oi);
+			pickedOf(i).clear();
+			pickedOf(i).add(oi);
 			freeformSelected[i] = false;
 			skipped[i] = false;
 			advanceAfterAnswer();
@@ -376,15 +382,15 @@ export function createDialog(deps: DialogDeps) {
 
 		function toggleOption(oi: number) {
 			const i = currentTab;
-			if (picked[i].has(oi)) picked[i].delete(oi);
-			else picked[i].add(oi);
-			if (picked[i].size > 0) skipped[i] = false;
+			if (pickedOf(i).has(oi)) pickedOf(i).delete(oi);
+			else pickedOf(i).add(oi);
+			if (pickedOf(i).size > 0) skipped[i] = false;
 			refresh();
 		}
 
 		function commitCustom() {
 			const i = currentTab;
-			picked[i].clear();
+			pickedOf(i).clear();
 			freeformSelected[i] = true;
 			skipped[i] = false;
 			advanceAfterAnswer();
@@ -411,7 +417,7 @@ export function createDialog(deps: DialogDeps) {
 				if (text) {
 					// Tentatively selected unless an option is already picked
 					// (then the text rides along as a note instead).
-					if (picked[i].size === 0) {
+					if (pickedOf(i).size === 0) {
 						freeformSelected[i] = true;
 						skipped[i] = false;
 					}
@@ -724,7 +730,7 @@ export function createDialog(deps: DialogDeps) {
 				return;
 			}
 
-			const row = rows[cursor()];
+			const row = rows[cursor()]!;
 			const ch = printableChar(data);
 
 			// Space: toggle (multiSelect), or activate the free-text input.
@@ -774,7 +780,7 @@ export function createDialog(deps: DialogDeps) {
 		// ---- Rendering ----
 
 		function previewBoxLines(qi: number, oi: number, width: number): string[] {
-			const opt = questions[qi].options[oi];
+			const opt = q(qi).options[oi];
 			if (!opt?.preview) return [];
 			const innerW = Math.max(1, width - 4);
 			const key = `${qi}:${oi}:${innerW}`;
@@ -785,7 +791,7 @@ export function createDialog(deps: DialogDeps) {
 					// (they are a border in a chat transcript). Inside a box of our
 					// own they are just noise, so drop those rows.
 					.filter((line) => !/^`{3,}[\w+-]*$/.test(stripTerminalSequences(line).trim()));
-				while (md.length > 0 && visibleWidth(md[md.length - 1].trim()) === 0) md.pop();
+				while (md.length > 0 && visibleWidth(md[md.length - 1]!.trim()) === 0) md.pop();
 				mdCache.set(key, md);
 			}
 			const shown = md.slice(0, PREVIEW_MAX_LINES);
@@ -833,14 +839,14 @@ export function createDialog(deps: DialogDeps) {
 			opts: { showMarker: boolean; showCheck: boolean; withDescription: boolean },
 		): string[] {
 			const lines: string[] = [];
-			const opt = question.options[oi];
+			const opt = question.options[oi]!;
 			const pointer = focused ? theme.fg("accent", "❯ ") : "  ";
 			const num = theme.fg("dim", `${oi + 1}. `);
 			let marker = "";
 			if (opts.showMarker) {
-				marker = picked[currentTabForRender].has(oi) ? theme.fg("success", "[x] ") : theme.fg("muted", "[ ] ");
+				marker = pickedOf(currentTabForRender).has(oi) ? theme.fg("success", "[x] ") : theme.fg("muted", "[ ] ");
 			}
-			const isPicked = picked[currentTabForRender].has(oi);
+			const isPicked = pickedOf(currentTabForRender).has(oi);
 			const check = opts.showCheck && isPicked ? theme.fg("success", " ✓") : "";
 			const labelColor = focused ? "accent" : isPicked && opts.showCheck ? "success" : "text";
 			const prefix = pointer + num + marker;
@@ -938,7 +944,7 @@ export function createDialog(deps: DialogDeps) {
 			const prevTab = currentTabForRender;
 			currentTabForRender = qi;
 			try {
-				const question = questions[qi];
+				const question = q(qi);
 				const rows = rowsFor(question);
 				const lines: string[] = [];
 				let focusLine = 0;
@@ -953,7 +959,7 @@ export function createDialog(deps: DialogDeps) {
 				let qLines = mdCache.get(qKey);
 				if (!qLines) {
 					qLines = new Markdown(question.question, 0, 0, mdTheme).render(Math.max(1, width - 1));
-					while (qLines.length > 0 && visibleWidth(qLines[qLines.length - 1].trim()) === 0) qLines.pop();
+					while (qLines.length > 0 && visibleWidth(qLines[qLines.length - 1]!.trim()) === 0) qLines.pop();
 					mdCache.set(qKey, qLines);
 				}
 				for (const line of qLines) lines.push(" " + line);
@@ -982,7 +988,7 @@ export function createDialog(deps: DialogDeps) {
 					// Once focus moves past the option list (onto Skip/Chat), keep showing
 					// the last option actually looked at rather than snapping to whichever
 					// option is last in the array.
-					const focusedOption = view.focusRow < question.options.length ? view.focusRow : lastOptionByQ[qi];
+					const focusedOption = view.focusRow < question.options.length ? view.focusRow : (lastOptionByQ[qi] ?? 0);
 					const right = previewBoxLines(qi, focusedOption, rightW);
 					const rowCount = Math.max(left.length, right.length);
 					for (let t = 0; t < rowCount; t++) {
@@ -1001,7 +1007,7 @@ export function createDialog(deps: DialogDeps) {
 					// No leading space on the action rows: their own pointer ("❯ "/"  ") is
 					// the indent, same as the option rows above.
 					for (let r = question.options.length; r < rows.length; r++) {
-						const kind = rows[r].kind as SentinelKind;
+						const kind = rows[r]!.kind as SentinelKind;
 						if (ROW_INTENT[kind].blankAbove) lines.push("");
 						if (ROW_INTENT[kind].ruleAbove) lines.push(separatorLine(width));
 						if (view.focusRow === r) focusLine = lines.length;
@@ -1011,13 +1017,13 @@ export function createDialog(deps: DialogDeps) {
 				}
 
 				for (let r = 0; r < rows.length; r++) {
-					const row = rows[r];
+					const row = rows[r]!;
 					const focused = view.focusRow === r;
 					// Stacked preview (narrow terminal): the box and the notes line sit
 					// between the option rows and the action rows. Notes render even when
 					// the focused option has no preview, matching the side-by-side layout.
 					if (preview && r === question.options.length) {
-						const focusedOption = view.focusRow < question.options.length ? view.focusRow : lastOptionByQ[qi];
+						const focusedOption = view.focusRow < question.options.length ? view.focusRow : (lastOptionByQ[qi] ?? 0);
 						const box = previewBoxLines(qi, focusedOption, Math.max(10, width - 2));
 						lines.push("");
 						for (const line of box) lines.push(" " + line);
@@ -1088,8 +1094,8 @@ export function createDialog(deps: DialogDeps) {
 			if (cached !== undefined) return cached;
 			let max = 0;
 			for (let i = 0; i < questions.length; i++) {
-				if (hasPreviewLayout(questions[i])) {
-					for (let oi = 0; oi < questions[i].options.length; oi++) {
+				if (hasPreviewLayout(q(i))) {
+					for (let oi = 0; oi < q(i).options.length; oi++) {
 						max = Math.max(max, questionBodyLines(i, width, { focusRow: oi, editingKind: "none" }).lines.length);
 					}
 				} else {
@@ -1105,7 +1111,7 @@ export function createDialog(deps: DialogDeps) {
 			for (let i = 0; i < questions.length; i++) {
 				const isActive = i === currentTab;
 				const box = isAnswered(i) ? "■" : hasNotes(i) ? "✎" : skipped[i] ? "–" : "□";
-				const text = ` ${box} ${questions[i].header} `;
+				const text = ` ${box} ${q(i).header} `;
 				const styled = isActive
 					? theme.bg("selectedBg", theme.fg("text", text))
 					: theme.fg(isAnswered(i) ? "success" : "muted", text);

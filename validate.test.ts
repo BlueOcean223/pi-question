@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { RawQuestion } from "./types.js";
-import { validateQuestions } from "./validate.js";
+import type { RawQuestion } from "./types.ts";
+import { validateQuestions } from "./validate.ts";
 
 const ok: RawQuestion = { question: "Which?", options: [{ label: "A" }, { label: "B" }] };
 

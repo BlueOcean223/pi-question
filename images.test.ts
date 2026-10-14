@@ -6,8 +6,8 @@
 
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { extensionFromMagic } from "./clipboard.js";
-import { attachedPaths, attachmentLabel, collectImages, extractImagePathCandidates } from "./images.js";
+import { extensionFromMagic } from "./clipboard.ts";
+import { attachedPaths, attachmentLabel, collectImages, extractImagePathCandidates } from "./images.ts";
 
 describe("extractImagePathCandidates", () => {
 	test("finds a path among ordinary words", () => {
@@ -99,9 +99,9 @@ describe("collectImages", () => {
 	test("reads a real image into a provider-ready block", async () => {
 		const { blocks, attached, notes } = await collectImages([{ question: "Which?", paths: [shot] }], { vision: true });
 		expect(blocks).toHaveLength(1);
-		expect(blocks[0].type).toBe("image");
-		expect(blocks[0].mimeType).toBe("image/png");
-		expect(blocks[0].data.length).toBeGreaterThan(0);
+		expect(blocks[0]!.type).toBe("image");
+		expect(blocks[0]!.mimeType).toBe("image/png");
+		expect(blocks[0]!.data.length).toBeGreaterThan(0);
 		expect(attached.map((a) => a.name)).toEqual(["single-select.png"]);
 		expect(notes).toEqual([]);
 	});

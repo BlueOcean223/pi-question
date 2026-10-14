@@ -15,8 +15,8 @@ import {
 	formatChatAboutThis,
 	formatSubmitted,
 	NOTES_ONLY,
-} from "./format.js";
-import type { Answer, AskResult, Question } from "./types.js";
+} from "./format.ts";
+import type { Answer, AskResult, Question } from "./types.ts";
 
 function question(text: string, header = "Q"): Question {
 	return { header, question: text, options: [{ label: "A" }, { label: "B" }], multiSelect: false };

@@ -9,7 +9,7 @@
  * switches in sync. `Record<RowKind, RowIntent>` makes the compiler ask for it.
  */
 
-import type { Question } from "./types.js";
+import type { Question } from "./types.ts";
 
 export type RowKind = "option" | "freetext" | "submit" | "skip" | "chat";
 

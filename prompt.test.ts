@@ -8,9 +8,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { PROMPT_GUIDELINES, PROMPT_SNIPPET, TOOL_DESCRIPTION } from "./prompt.js";
-import { MAX_OPTIONS, MAX_QUESTIONS, MIN_OPTIONS } from "./types.js";
-import { TOOL_NAME } from "./reconcile.js";
+import { PROMPT_GUIDELINES, PROMPT_SNIPPET, TOOL_DESCRIPTION } from "./prompt.ts";
+import { MAX_OPTIONS, MAX_QUESTIONS, MIN_OPTIONS } from "./types.ts";
+import { TOOL_NAME } from "./reconcile.ts";
 
 describe("PROMPT_SNIPPET", () => {
 	test("is present — a tool without one is dropped from the system prompt's tool list", () => {

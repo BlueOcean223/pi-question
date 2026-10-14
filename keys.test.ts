@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createKeymap, formatKeySpec, type KeybindingMatcher } from "./keys.js";
+import { createKeymap, formatKeySpec, type KeybindingMatcher } from "./keys.ts";
 
 /** Stands in for Pi's keybinding manager: an id -> key-data table. */
 function manager(bindings: Record<string, string[]>): KeybindingMatcher {
