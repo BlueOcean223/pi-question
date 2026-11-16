@@ -22,7 +22,8 @@
  * - Answers keyed by full question text; notes/preview echoed as annotations
  * - Waits for an answer by default; PI_QUESTION_AFK_TIMEOUT opts into an idle
  *   auto-submit of whatever is selected so far
- * - Reports itself to herdr as blocked while it waits
+ * - Reports pi as blocked while it waits: to the terminal through pi's program
+ *   status, and to herdr
  * - Keys resolve through Pi's keybinding manager, so remaps are honored
  * - Stable layout: every tab padded to the tallest question's height, and the
  *   whole body bounded by the terminal so it never scrolls off the top
@@ -47,6 +48,16 @@ import { validateQuestions } from "./validate.ts";
  * itself shows as "working" for as long as nobody answers it.
  */
 const BLOCKED_EVENT = "herdr:blocked";
+
+/**
+ * What pi tells the terminal it is waiting for (program status, OSC 7501).
+ *
+ * pi keeps prompts and model output out of these reports. The headers and the
+ * question text are model output, so the message only counts the questions.
+ */
+function blockedMessage(count: number): string {
+	return count === 1 ? "Waiting for an answer to 1 question" : `Waiting for answers to ${count} questions`;
+}
 
 /** A bad value is reported once per process, not on every question. */
 let afkConfigWarned = false;
@@ -160,6 +171,10 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 								notify: (message, type) => ctx.ui.notify(message, type),
 								afkTimeoutMs: afk.timeoutMs,
 							}),
+							// `ui.custom()` also hosts loaders, so pi does not treat a custom
+							// component as waiting on the user unless told. A pi without the
+							// option ignores it.
+							{ blocked: { kind: "question", message: blockedMessage(questions.length) } },
 						);
 					} finally {
 						pi.events.emit(BLOCKED_EVENT, { active: false });
